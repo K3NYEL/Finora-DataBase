@@ -159,7 +159,7 @@ export async function registerNotificationAndPatchRoutes(
              size_bytes, mandatory, notes_json, created_at
       FROM patch_releases
       WHERE published = 1 AND platform = ? AND architecture IN (?, 'universal')
-      ORDER BY CASE WHEN architecture = ? THEN 0 ELSE 1 END, build DESC, created_at DESC
+      ORDER BY build DESC, CASE WHEN architecture = ? THEN 0 ELSE 1 END, created_at DESC
       LIMIT 1
     `).get(platform, architecture, architecture) as Record<string, unknown> | undefined;
     if (!row) return reply.send({ patch: null });
