@@ -171,7 +171,7 @@ test("database migrations are recorded and safely re-run", async () => {
   try {
     const migration = database.prepare("SELECT MAX(version) AS version FROM schema_migrations")
       .get() as { version: number };
-    assert.equal(migration.version, 2);
+    assert.equal(migration.version, 3);
     assert.equal(database.pragma("foreign_keys", { simple: true }), 1);
   } finally {
     database.close();
@@ -181,9 +181,27 @@ test("database migrations are recorded and safely re-run", async () => {
   try {
     const rows = reopened.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as
       Array<{ version: number }>;
-    assert.deepEqual(rows, [{ version: 1 }, { version: 2 }]);
+    assert.deepEqual(rows, [{ version: 1 }, { version: 2 }, { version: 3 }]);
   } finally {
     reopened.close();
+  }
+});
+
+test("sync migration adds versioning, tombstones, timestamps, and idempotency storage", async () => {
+  const database = openDatabase(databasePath);
+  try {
+    for (const table of ["accounts", "categories", "transactions", "transfers", "budgets"]) {
+      const columns = database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      assert.equal(columns.some((column) => column.name === "sync_version"), true, table);
+      assert.equal(columns.some((column) => column.name === "deleted_at"), true, table);
+      assert.equal(columns.some((column) => column.name === "updated_at"), true, table);
+    }
+    const idempotencyTable = database.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'api_idempotency_keys'",
+    ).get();
+    assert.ok(idempotencyTable);
+  } finally {
+    database.close();
   }
 });
 
