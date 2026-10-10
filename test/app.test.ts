@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -159,6 +159,11 @@ test("registration endpoint rate-limits repeated attempts", async () => {
   }
   assert.equal(responses.slice(0, 5).every((response) => response.statusCode === 400), true);
   assert.equal(responses[5]?.statusCode, 429);
+});
+
+test("database file has restrictive POSIX permissions", async () => {
+  if (process.platform === "win32") return;
+  assert.equal(statSync(databasePath).mode & 0o777, 0o600);
 });
 
 test("database migrations are recorded and safely re-run", async () => {
