@@ -1,28 +1,30 @@
-import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiDatabase } from "./database.js";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const SCRYPT_KEY_LENGTH = 64;
 const SCRYPT_OPTIONS = { N: 16_384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+const scryptAsync = promisify(scrypt);
 const DUMMY_PASSWORD_HASH = hashPassword("dummy-password-never-used-for-an-account");
 
 type Credentials = { username: string; password: string };
 
-function hashPassword(password: string): string {
+async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
-  const hash = scryptSync(password, salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS);
-  return `scrypt$${salt.toString("base64url")}$${hash.toString("base64url")}`;
+  const hash = await scryptAsync(password, salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS) as Buffer;
+  return `scrypt${salt.toString("base64url")}${hash.toString("base64url")}`;
 }
 
-function verifyPassword(password: string, stored: string): boolean {
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const parts = stored.split("$");
   if (parts.length !== 3 || parts[0] !== "scrypt") return false;
   try {
     const salt = Buffer.from(parts[1]!, "base64url");
     const expected = Buffer.from(parts[2]!, "base64url");
     if (salt.length !== 16 || expected.length !== SCRYPT_KEY_LENGTH) return false;
-    const actual = scryptSync(password, salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS);
+    const actual = await scryptAsync(password, salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS) as Buffer;
     return timingSafeEqual(actual, expected);
   } catch {
     return false;
@@ -112,7 +114,7 @@ export async function registerAuthRoutes(app: FastifyInstance, database: ApiData
       database.prepare(`
         INSERT INTO api_users(id, username, password_hash, created_at)
         VALUES (?, ?, ?, ?)
-      `).run(userId, credentials.username, hashPassword(credentials.password), createdAt);
+      `).run(userId, credentials.username, await hashPassword(credentials.password), createdAt);
     } catch (error) {
       if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
         return reply.code(409).send({
@@ -148,7 +150,8 @@ export async function registerAuthRoutes(app: FastifyInstance, database: ApiData
       | { id: string; username: string; password_hash: string; created_at: string }
       | undefined;
 
-    const passwordValid = verifyPassword(credentials.password, row?.password_hash ?? DUMMY_PASSWORD_HASH);
+    const hashToVerify = row?.password_hash ?? await DUMMY_PASSWORD_HASH;
+    const passwordValid = await verifyPassword(credentials.password, hashToVerify);
     if (!row || !passwordValid) {
       return reply.code(401).send({
         error: { code: "INVALID_LOGIN", message: "Username or password is incorrect" },
