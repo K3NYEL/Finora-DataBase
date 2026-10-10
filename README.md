@@ -23,14 +23,14 @@ Registration/login use a username (3–32 characters: letters, numbers, dot, und
 
 ## Encrypted backup API
 
-The backup vault stores **opaque encrypted bytes only**; it does not export financial rows from the API database. The Flutter client must encrypt the complete local backup on the device before calling this endpoint. Never upload plaintext JSON, an unencrypted SQLite file, passwords, encryption keys, or the local database directly. The server validates the payload format and SHA-256 integrity, but it cannot prove that a client really encrypted the bytes.
+The backup vault stores **opaque bytes only**; it does not export financial rows from the API database. The Flutter client must encrypt the complete local backup on the device before calling this endpoint. Never upload plaintext JSON, an unencrypted SQLite file, passwords, encryption keys, or the local database directly. The server validates the payload format and SHA-256 integrity, but it cannot prove that a client really encrypted the bytes.
 
 Upload requires `Authorization: Bearer <accessToken>` and a JSON body with:
 - `format`: exactly `finora-encrypted-backup-v1`
 - `ciphertext`: base64url-encoded encrypted bytes
 - `sha256`: SHA-256 hex digest of the decoded encrypted bytes
 
-The API currently limits each encrypted backup to 5 MiB and each user to 10 backups. Backup files are stored separately from SQLite under `BACKUP_STORAGE_PATH`, in per-user directories with restrictive POSIX permissions where supported. The server generates opaque UUIDs for backup IDs, verifies checksums on download, and applies ownership checks to list, download, and delete operations. Upload is limited to 10 requests per hour per IP; the global API rate limit also applies.
+The API currently limits each backup to 5 MiB and each user to 10 backups. Backup files are stored separately from SQLite under `BACKUP_STORAGE_PATH`, in per-user directories with restrictive POSIX permissions where supported. The server generates UUID IDs, verifies checksums on download, and applies ownership checks to list, download, and delete operations. Upload is limited to 10 requests per hour per IP; the global API rate limit also applies.
 
 Example request shape (use ciphertext produced by the client-side encryption implementation; this placeholder is not a real backup):
 
@@ -46,22 +46,7 @@ Content-Type: application/json
 }
 ```
 
-A successful upload returns HTTP 201 with backup metadata. Listing never returns ciphertext. Download returns the ciphertext plus metadata. A backup upload endpoint alone does not implement the Flutter UI, client-side encryption, restore validation, or automatic scheduled uploads; those must be completed and tested before enabling the feature in the app.
-
-## Security and storage
-
-- Helmet security headers, global and route-specific rate limits
-- Request body limits, request timeout, and no-store response headers
-- Exact-origin allowlist via `CORS_ORIGINS`
-- Redaction of authorization and credential-related fields, including backup ciphertext, in logs
-- Generic JSON error responses
-- Transactional, versioned SQLite migrations; foreign-key enforcement, WAL mode, busy timeout, and restrictive database-file permissions where supported
-- Composite foreign keys tie financial references to the same owner; API queries filter by authenticated session user, not a client-supplied owner ID
-- Money values use integer minor units
-- Tests cover authentication, ownership isolation, idempotency, optimistic concurrency, sync tombstones, and backup upload/download/delete/integrity checks
-- Locked npm dependency tree for reproducible `npm ci` installs
-
-The server binds to `127.0.0.1:3000` by default. SQLite defaults to `./data/finora.db`; encrypted backups default to `./data/backups`. Both paths must be persistent, private, excluded from Git, and outside any static/public web root. Backups are not a substitute for a separate disaster-recovery copy of the server's storage.
+A successful upload returns HTTP 201 with backup metadata. Listing never returns ciphertext. Download returns ciphertext plus metadata. The API alone does not implement Flutter UI, client-side encryption, restore validation, or scheduled uploads.
 
 ## Run locally
 
@@ -89,18 +74,45 @@ npm run build
 npm start
 ```
 
+## Container deployment (persistent data)
+
+The repository includes a Dockerfile and Compose configuration. They run the API as the unprivileged `node` user, drop Linux capabilities, use a read-only container filesystem, and store SQLite plus backup files in a named persistent volume at `/data`.
+
+```bash
+cp .env.example .env
+# Edit .env; set CORS_ORIGINS to the exact frontend origin only if needed.
+docker compose up --build -d
+docker compose ps
+curl http://127.0.0.1:3000/api/v1/health
+```
+
+Compose binds the API to `127.0.0.1:3000` on the host, not to the public network. Keep it behind a trusted HTTPS reverse proxy when deployed on a server. The named volume `finora_data` survives container rebuilds; still configure an independent backup of the server volume and test restoring it. Do not run `docker compose down -v` unless you intend to permanently delete the named data volume.
+
 ## Configuration
 
-- `HOST`: defaults to `127.0.0.1`; use a trusted reverse proxy before public exposure.
+- `HOST`: defaults to `127.0.0.1`; Compose overrides this to `0.0.0.0` inside the container.
 - `PORT`: defaults to `3000`.
-- `DATABASE_PATH`: defaults to `./data/finora.db`.
-- `BACKUP_STORAGE_PATH`: defaults to `./data/backups`; use persistent private storage.
+- `DATABASE_PATH`: defaults to `./data/finora.db`; Compose uses `/data/finora.db`.
+- `BACKUP_STORAGE_PATH`: defaults to `./data/backups`; Compose uses `/data/backups`.
 - `CORS_ORIGINS`: comma-separated exact web origins, including scheme and port. Keep empty until the actual frontend origin is confirmed.
 
-Never commit `.env`, SQLite database files, backup files, credentials, tokens, or encryption keys. Public deployment requires HTTPS, persistent storage, monitoring, tested backup/restore procedures, and reviewed hosting limits.
+Never commit `.env`, SQLite database files, backup files, credentials, tokens, or encryption keys. Public deployment requires HTTPS, persistent private storage, monitoring, and tested backup/restore procedures.
+
+## Security and storage
+
+- Helmet security headers, global and route-specific rate limits
+- Request body limits, request timeout, and no-store response headers
+- Exact-origin allowlist via `CORS_ORIGINS`
+- Redaction of authorization and credential-related fields, including backup ciphertext, in logs
+- Generic JSON error responses
+- Transactional, versioned SQLite migrations; foreign-key enforcement, WAL mode, busy timeout, and restrictive database-file permissions where supported
+- Composite foreign keys tie financial references to the same owner; API queries filter by authenticated session user, not a client-supplied owner ID
+- Money values use integer minor units
+- Tests cover authentication, ownership isolation, idempotency, optimistic concurrency, sync tombstones, and backup upload/download/delete/integrity checks
+- Locked npm dependency tree for reproducible `npm ci` installs
 
 ## Current limitations
 
-The first financial API iteration has account linking and client integration limitations. The Flutter app currently identifies local profiles by first and last name and does not collect a unique username; this API's username-based identity is not wired into the app. Do not enable financial sync automatically. The backup endpoints are server-side groundwork only: client-side encryption, an opt-in upload/restore flow, and real device integration are still required.
+The Flutter app's account identity is not yet linked to this API, and automatic financial sync remains disabled. The backup endpoints are server-side groundwork only: client-side encryption, opt-in upload/restore UI, and real device integration are still required.
 
-**Do not deploy this as a public financial-data service yet.** Before accepting real data, review the API, finish client-side encryption and restore validation, configure HTTPS and persistent private storage on the selected host, and test recovery end to end.
+**Do not deploy this as a public financial-data service yet.** Before accepting real data, finish encryption and restore validation, configure HTTPS and persistent private storage on the selected host, and test recovery end to end.
