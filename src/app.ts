@@ -5,6 +5,7 @@ import { openDatabase } from "./database.js";
 import { registerAuthRoutes } from "./auth.js";
 import { registerFinanceRoutes } from "./finance.js";
 import { registerSyncRoutes } from "./sync.js";
+import { registerSyncPushRoutes } from "./sync_push.js";
 
 function parseAllowedOrigins(raw: string | undefined): Set<string> {
   return new Set((raw ?? "").split(",").map((origin) => origin.trim()).filter(Boolean));
@@ -87,6 +88,7 @@ export async function buildApp(options: { databasePath?: string } = {}): Promise
   await registerAuthRoutes(app, database);
   await registerFinanceRoutes(app, database);
   await registerSyncRoutes(app, database);
+  await registerSyncPushRoutes(app, database);
 
   app.setNotFoundHandler(async (_request, reply) =>
     reply.code(404).send({ error: { code: "NOT_FOUND", message: "Resource not found" } }),
