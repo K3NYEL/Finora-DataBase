@@ -32,6 +32,7 @@ afterEach(async () => {
 test("health endpoint reports the service as available", async () => {
   const response = await app.inject({ method: "GET", url: "/api/v1/health" });
   assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["cache-control"], "no-store");
   assert.deepEqual(response.json(), { status: "ok", service: "finora-database-api" });
 });
 
