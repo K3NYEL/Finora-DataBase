@@ -169,6 +169,22 @@ export async function registerVersionedRoutes(app: FastifyInstance, database: Ap
       const row = ownedActive(database, resource, params.id!, user.id);
       if (!row) return { kind: "missing" as const };
       if (row.sync_version !== expectedVersion) return { kind: "conflict" as const, currentVersion: row.sync_version as number };
+      if (resource === "accounts") {
+        const dependent = database.prepare(`
+          SELECT 1 FROM transactions WHERE user_id = ? AND account_id = ? AND deleted_at IS NULL
+          UNION ALL SELECT 1 FROM transfers WHERE user_id = ? AND (from_account_id = ? OR to_account_id = ?) AND deleted_at IS NULL
+          LIMIT 1
+        `).get(user.id, params.id, user.id, params.id, params.id);
+        if (dependent) return { kind: "in_use" as const };
+      }
+      if (resource === "categories") {
+        const dependent = database.prepare(`
+          SELECT 1 FROM transactions WHERE user_id = ? AND category_id = ? AND deleted_at IS NULL
+          UNION ALL SELECT 1 FROM budgets WHERE user_id = ? AND category_id = ? AND deleted_at IS NULL
+          LIMIT 1
+        `).get(user.id, params.id, user.id, params.id);
+        if (dependent) return { kind: "in_use" as const };
+      }
       const now = new Date().toISOString();
       const result = database.prepare(`
         UPDATE ${resource}
@@ -181,6 +197,7 @@ export async function registerVersionedRoutes(app: FastifyInstance, database: Ap
     const result = run();
     if (result.kind === "missing") return sendError(reply, 404, "RESOURCE_NOT_FOUND", "Resource not found");
     if (result.kind === "conflict") return reply.code(409).send({ error: { code: "VERSION_CONFLICT", message: "Resource changed; fetch the latest version before retrying" }, currentVersion: result.currentVersion });
+    if (result.kind === "in_use") return sendError(reply, 409, "RESOURCE_IN_USE", "Delete dependent financial records before deleting this resource");
     return reply.send({ resource: result });
   });
 }
