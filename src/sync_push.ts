@@ -136,6 +136,10 @@ function applyOne(db: ApiDatabase, userId: string, op: ReturnType<typeof validat
     return {opId:op.opId,action:op.action,resource:op.resource,id:op.id,syncVersion:op.expectedVersion!+1};
   }
   const dbChanges = Object.fromEntries(Object.entries(op.changes!).map(([k,v])=>[rules[op.resource][k]!.column,k==="occurredAt"&&typeof v==="string"?new Date(v).toISOString():v]));
+  if (op.resource === "categories" && "kind" in op.changes! && op.changes!.kind !== row.kind) {
+    const dependent = db.prepare("SELECT 1 FROM transactions WHERE user_id=? AND category_id=? AND deleted_at IS NULL UNION ALL SELECT 1 FROM budgets WHERE user_id=? AND category_id=? AND deleted_at IS NULL LIMIT 1").get(userId,op.id,userId,op.id);
+    if (dependent) fail(409,"RESOURCE_IN_USE","Category kind cannot change while active transactions or budgets reference it");
+  }
   if (!relationOk(db,op.resource,{...row,...dbChanges},userId)) fail(404,"RELATED_RESOURCE_NOT_FOUND","A related active resource was not found or is incompatible");
   const entries=Object.entries(dbChanges), sets=entries.map(([k])=>`${k}=?`);
   sets.push("updated_at=?","sync_version=sync_version+1");
