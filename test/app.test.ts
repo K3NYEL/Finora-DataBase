@@ -63,12 +63,13 @@ test("preflight requests return the configured CORS policy", async () => {
     headers: {
       origin: allowedOrigin,
       "access-control-request-method": "POST",
-      "access-control-request-headers": "content-type, authorization",
+      "access-control-request-headers": "content-type, authorization, idempotency-key",
     },
   });
   assert.equal(response.statusCode, 204);
   assert.equal(response.headers["access-control-allow-origin"], allowedOrigin);
   assert.equal(response.headers["access-control-allow-methods"], "GET, POST, OPTIONS");
+  assert.equal(response.headers["access-control-allow-headers"], "Content-Type, Authorization, Idempotency-Key");
 });
 
 test("preflight rejects unsupported methods and headers", async () => {
@@ -345,7 +346,7 @@ test("financial routes require authentication and isolate each user's records", 
   assert.equal(crossUserBudget.statusCode, 404);
 
   const transactionResponse = await app.inject({
-    method: "POST", url: "/api/v1/transactions", headers: auth(aliceToken),
+    method: "POST", url: "/api/v1/transactions", headers: { ...auth(aliceToken), "idempotency-key": "transaction-lunch-2026" },
     payload: {
       accountId: aliceAccount.id, categoryId: aliceCategory.id, kind: "expense",
       amountMinor: 2500, occurredAt: "2026-10-10T12:00:00.000Z", description: "Lunch",
@@ -353,6 +354,28 @@ test("financial routes require authentication and isolate each user's records", 
   });
   assert.equal(transactionResponse.statusCode, 201);
   assert.equal(transactionResponse.json().transaction.amountMinor, 2500);
+
+  const replayedTransaction = await app.inject({
+    method: "POST", url: "/api/v1/transactions",
+    headers: { ...auth(aliceToken), "idempotency-key": "transaction-lunch-2026" },
+    payload: {
+      accountId: aliceAccount.id, categoryId: aliceCategory.id, kind: "expense",
+      amountMinor: 2500, occurredAt: "2026-10-10T12:00:00.000Z", description: "Lunch",
+    },
+  });
+  assert.equal(replayedTransaction.statusCode, 201);
+  assert.equal(replayedTransaction.json().transaction.id, transactionResponse.json().transaction.id);
+
+  const reusedKey = await app.inject({
+    method: "POST", url: "/api/v1/transactions",
+    headers: { ...auth(aliceToken), "idempotency-key": "transaction-lunch-2026" },
+    payload: {
+      accountId: aliceAccount.id, categoryId: aliceCategory.id, kind: "expense",
+      amountMinor: 9999, occurredAt: "2026-10-10T12:00:00.000Z", description: "Lunch",
+    },
+  });
+  assert.equal(reusedKey.statusCode, 409);
+  assert.equal(reusedKey.json().error.code, "IDEMPOTENCY_KEY_REUSED");
 
   const aliceTransactions = await app.inject({ method: "GET", url: "/api/v1/transactions", headers: auth(aliceToken) });
   const bobTransactions = await app.inject({ method: "GET", url: "/api/v1/transactions", headers: auth(bobToken) });
