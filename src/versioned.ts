@@ -9,7 +9,7 @@ type ResourceConfig = { fields: Record<string, FieldRule> };
 const nonEmpty = (max: number) => (value: unknown): boolean =>
   typeof value === "string" && value.trim().length > 0 && value.trim().length <= max;
 const optionalString = (max: number) => (value: unknown): boolean =>
-  value === null || (typeof value === "string" && value.length <= max);
+  typeof value === "string" && value.length <= max;
 const positiveInteger = (value: unknown): boolean =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 const integer = (value: unknown): boolean =>
