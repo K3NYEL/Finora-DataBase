@@ -166,6 +166,38 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    apply(database) {
+      // A global monotonic sequence avoids missing changes when timestamps tie.
+      database.exec("CREATE TABLE sync_clock (id INTEGER PRIMARY KEY CHECK(id = 1), value INTEGER NOT NULL CHECK(value >= 0))");
+      database.exec("INSERT INTO sync_clock(id, value) VALUES (1, 0)");
+      for (const table of ["accounts", "categories", "transactions", "transfers", "budgets"]) {
+        database.exec(`ALTER TABLE ${table} ADD COLUMN sync_seq INTEGER NOT NULL DEFAULT 0 CHECK(sync_seq >= 0)`);
+        const rows = database.prepare(`SELECT id FROM ${table} ORDER BY id`).all() as Array<{ id: string }>;
+        const update = database.prepare(`UPDATE ${table} SET sync_seq = ? WHERE id = ?`);
+        for (const row of rows) {
+          database.prepare("UPDATE sync_clock SET value = value + 1 WHERE id = 1").run();
+          const seq = (database.prepare("SELECT value FROM sync_clock WHERE id = 1").get() as { value: number }).value;
+          update.run(seq, row.id);
+        }
+        database.exec(`
+          CREATE TRIGGER ${table}_sync_seq_insert AFTER INSERT ON ${table}
+          BEGIN
+            UPDATE sync_clock SET value = value + 1 WHERE id = 1;
+            UPDATE ${table} SET sync_seq = (SELECT value FROM sync_clock WHERE id = 1) WHERE id = NEW.id;
+          END;
+          CREATE TRIGGER ${table}_sync_seq_update AFTER UPDATE ON ${table}
+          WHEN NEW.sync_seq = OLD.sync_seq
+          BEGIN
+            UPDATE sync_clock SET value = value + 1 WHERE id = 1;
+            UPDATE ${table} SET sync_seq = (SELECT value FROM sync_clock WHERE id = 1) WHERE id = NEW.id;
+          END;
+          CREATE INDEX idx_${table}_sync_seq ON ${table}(user_id, sync_seq);
+        `);
+      }
+    },
+  },
 ];
 
 function applyMigrations(database: ApiDatabase): void {
@@ -193,7 +225,7 @@ function applyMigrations(database: ApiDatabase): void {
 
   const requiredTables = [
     "api_users", "api_sessions", "accounts", "categories",
-    "transactions", "transfers", "budgets", "api_idempotency_keys",
+    "transactions", "transfers", "budgets", "api_idempotency_keys", "sync_clock",
   ];
   const missingTables = requiredTables.filter((table) => {
     const row = database
