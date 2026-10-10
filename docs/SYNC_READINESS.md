@@ -34,8 +34,8 @@ The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-uni
 2. **Money:** the API accepts integer minor units. Use the local `*_minor` columns and validate their completeness; do not sync floating-point `REAL` amounts.
 3. **Field names and semantics:** `type` vs `kind`, `date` vs `occurred_at`, and transfer source/destination names need an explicit adapter. Confirm the exact local meanings before mapping.
 4. **Ownership:** local `user_id` is nullable and legacy records can remain unassigned. No record may be uploaded until a user explicitly links the local profile and confirms ownership/adoption.
-5. **Incremental changes:** tombstones, sync versions, update timestamps, and indexes now exist. Normal list routes hide tombstones. Transaction/transfer creation requires an idempotency key; account/category/budget creation is not yet idempotent. There is no sync cursor or endpoint yet.
-6. **Conflicts:** PATCH/DELETE require `expectedVersion` and return 409 on stale writes. Account/category deletion is blocked while active dependent records exist. The app still needs a clear merge/conflict UX and a sync contract.
+5. **Incremental changes:** tombstones, sync versions, update timestamps, a global monotonic sequence, and indexes exist. `GET /api/v1/sync/changes?cursor=0&limit=100` provides authenticated, owner-scoped incremental pull with a stable watermark, pagination, and tombstones. Normal list routes hide tombstones. Transaction/transfer creation requires an idempotency key; account/category/budget creation is not yet idempotent. A push/batch-apply endpoint and client checkpoint persistence are not implemented yet.
+6. **Conflicts:** PATCH/DELETE require `expectedVersion` and return 409 on stale writes. Account/category deletion is blocked while active dependent records exist. The API incremental pull endpoint returns the latest state per changed record (including tombstones); the client still needs a clear merge/conflict UX and a sync contract.
 7. **Account balance:** opening balance is not current balance. Current balance must be derived consistently from opening balance, transactions, and transfers.
 
 ## Safe implementation sequence
@@ -43,7 +43,7 @@ The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-uni
 1. Validate the app's v6 migration with Flutter tests and a copied pre-migration database; never test migrations against the live user database.
 2. Agree on the local ID strategy (recommended: add a stable UUID sync ID while preserving local integer IDs initially).
 3. [Implemented in API branch] Version-checked PATCH, owner-scoped soft DELETE, tombstone-aware normal list reads, and dependency guards, with stale-version, cross-user, and dependency tests.
-4. Define a stable incremental pull cursor and implement pull/push sync operations with conflict handling and authorization tests.
+4. [Incremental pull implemented in API branch] `GET /api/v1/sync/changes` uses the global sequence as a cursor and returns current record state plus tombstones; add regression tests for pagination, cursor validation, and owner isolation. Next implement an explicit push/batch-apply contract with idempotency and expected-version checks.
 5. Implement an explicit opt-in link flow and a dry-run preview (counts and conflicts) before any upload.
 6. Test offline retries, duplicate requests, cross-user access, deletion propagation, and migration rollback/recovery.
 7. Only after review, enable sync behind an explicit user setting. Do not deploy publicly until transport security, backups, monitoring, and account-linking design are verified.
