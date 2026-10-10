@@ -24,7 +24,7 @@ export async function buildApp(options: { databasePath?: string } = {}): Promise
     },
     bodyLimit: 64 * 1024,
     requestTimeout: 10_000,
-    disableRequestLogging: true,
+    logController: { disableRequestLogging: true },
   });
 
   const database = openDatabase(options.databasePath);
