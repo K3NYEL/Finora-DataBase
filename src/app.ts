@@ -4,7 +4,6 @@ import rateLimit from "@fastify/rate-limit";
 import { openDatabase } from "./database.js";
 import { registerAuthRoutes } from "./auth.js";
 import { registerFinanceRoutes } from "./finance.js";
-import { registerSyncRoutes } from "./sync.js";
 
 function parseAllowedOrigins(raw: string | undefined): Set<string> {
   return new Set((raw ?? "").split(",").map((origin) => origin.trim()).filter(Boolean));
@@ -86,7 +85,6 @@ export async function buildApp(options: { databasePath?: string } = {}): Promise
 
   await registerAuthRoutes(app, database);
   await registerFinanceRoutes(app, database);
-  await registerSyncRoutes(app, database);
 
   app.setNotFoundHandler(async (_request, reply) =>
     reply.code(404).send({ error: { code: "NOT_FOUND", message: "Resource not found" } }),
