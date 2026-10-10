@@ -17,6 +17,11 @@ Backend API for Finora, built with Node.js 22, TypeScript, Fastify, and SQLite. 
 - `POST /api/v1/backups` — upload an encrypted backup
 - `GET /api/v1/backups` — list the authenticated user's backup metadata
 - `GET /api/v1/backups/:id` — download one of the authenticated user's encrypted backups
+- `GET /api/v1/notifications` — list published notifications for the authenticated user
+- `POST /api/v1/notifications/:id/read` — mark a notification as read
+- `POST /api/v1/admin/notifications` — publish a notification (admin secret required)
+- `GET /api/v1/patches/latest` — retrieve the latest Android release manifest
+- `POST /api/v1/admin/patches` — publish a release manifest (admin secret required)
 - `DELETE /api/v1/backups/:id` — delete one of the authenticated user's backups
 
 Registration/login use a username (3–32 characters: letters, numbers, dot, underscore, hyphen) and a password of 12–128 characters. Passwords are stored as scrypt hashes with random salts; session tokens are random, expire after 30 days, and only their SHA-256 hashes are stored in SQLite. Authentication endpoints have dedicated rate limits.
@@ -47,6 +52,27 @@ Content-Type: application/json
 ```
 
 A successful upload returns HTTP 201 with backup metadata. Listing never returns ciphertext. Download returns ciphertext plus metadata. The API alone does not implement Flutter UI, client-side encryption, restore validation, or scheduled uploads.
+
+## Notifications
+
+- `GET /api/v1/notifications` — authenticated user's published inbox; includes read state.
+- `POST /api/v1/notifications/:id/read` — marks a published notification as read.
+- `POST /api/v1/admin/notifications` — publishes a notification for all authenticated accounts.
+
+Admin publishing requires `Authorization: Bearer <FINORA_ADMIN_KEY>`. Set `FINORA_ADMIN_KEY` to a randomly generated secret of at least 32 characters in the server's secret manager or private `.env`; never commit it. Publishing endpoints return 503 when the secret is not configured and 401 for invalid credentials. The API supports `info`, `success`, `warning`, and `critical` severity, optional expiry, and limits titles/messages to reduce abuse. Notifications are stored in SQLite and each user's read state is stored separately.
+
+This is an in-app notification inbox API, not push notifications from Android/iOS. The Flutter interface and optional OS push delivery are not wired yet.
+
+## Patch and release catalog
+
+- `GET /api/v1/patches/latest?platform=android&architecture=arm64-v8a` — returns the newest published release manifest for the requested supported architecture, falling back to `universal` when necessary.
+- `POST /api/v1/admin/patches` — registers a release asset with version/build, architecture, HTTPS URL, SHA-256, size, mandatory flag, and release notes.
+
+Patch publishing uses the same `FINORA_ADMIN_KEY` bearer secret. The catalog only accepts Finora GitHub Release asset URLs, Android architecture identifiers, valid SHA-256 values, and assets up to 100 MiB. APK bytes remain hosted by GitHub Releases; the API stores metadata, not binaries.
+
+**Scope clarification:** this first patch system is a secure release/patch manifest for complete APKs. It does not yet apply binary-delta patches to an installed APK. The existing Flutter updater still uses GitHub Releases directly; connecting it to this catalog and verifying SHA-256 before install are follow-up client changes. Android's package installer must still verify the APK signature.
+
+
 
 ## Run locally
 
@@ -95,6 +121,7 @@ Compose binds the API to `127.0.0.1:3000` on the host, not to the public network
 - `DATABASE_PATH`: defaults to `./data/finora.db`; Compose uses `/data/finora.db`.
 - `BACKUP_STORAGE_PATH`: defaults to `./data/backups`; Compose uses `/data/backups`.
 - `CORS_ORIGINS`: comma-separated exact web origins, including scheme and port. Keep empty until the actual frontend origin is confirmed.
+- `FINORA_ADMIN_KEY`: private publishing secret of at least 32 characters for notification and patch administration; configure outside source control.
 
 Never commit `.env`, SQLite database files, backup files, credentials, tokens, or encryption keys. Public deployment requires HTTPS, persistent private storage, monitoring, and tested backup/restore procedures.
 
@@ -108,7 +135,7 @@ Never commit `.env`, SQLite database files, backup files, credentials, tokens, o
 - Transactional, versioned SQLite migrations; foreign-key enforcement, WAL mode, busy timeout, and restrictive database-file permissions where supported
 - Composite foreign keys tie financial references to the same owner; API queries filter by authenticated session user, not a client-supplied owner ID
 - Money values use integer minor units
-- Tests cover authentication, ownership isolation, idempotency, optimistic concurrency, sync tombstones, and backup upload/download/delete/integrity checks
+- Tests cover authentication, ownership isolation, idempotency, optimistic concurrency, sync tombstones, backup upload/download/delete/integrity checks, notification read state, admin publishing authorization, and patch manifest validation
 - Locked npm dependency tree for reproducible `npm ci` installs
 
 ## Current limitations
