@@ -68,7 +68,7 @@ test("preflight requests return the configured CORS policy", async () => {
   });
   assert.equal(response.statusCode, 204);
   assert.equal(response.headers["access-control-allow-origin"], allowedOrigin);
-  assert.equal(response.headers["access-control-allow-methods"], "GET, POST, OPTIONS");
+  assert.equal(response.headers["access-control-allow-methods"], "GET, POST, PATCH, DELETE, OPTIONS");
   assert.equal(response.headers["access-control-allow-headers"], "Content-Type, Authorization, Idempotency-Key");
 });
 
@@ -459,4 +459,65 @@ test("budgets require an owned expense category and duplicate periods are reject
   assert.equal(first.statusCode, 201);
   const duplicate = await app.inject({ method: "POST", url: "/api/v1/budgets", headers: auth, payload });
   assert.equal(duplicate.statusCode, 409);
+});
+
+
+test("versioned updates reject stale versions and deletes create owner-scoped tombstones", async () => {
+  const registerUser = async (username: string) => {
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/auth/register",
+      payload: { username, password },
+    });
+    assert.equal(response.statusCode, 201);
+    return response.json().accessToken as string;
+  };
+  const aliceToken = await registerUser("version_owner");
+  const bobToken = await registerUser("version_other");
+  const auth = (token: string) => ({ authorization: `Bearer ${token}` });
+
+  const created = await app.inject({
+    method: "POST", url: "/api/v1/accounts", headers: auth(aliceToken),
+    payload: { name: "Primary", type: "cash", currencyCode: "DOP", openingBalanceMinor: 5000 },
+  });
+  assert.equal(created.statusCode, 201);
+  const accountId = created.json().account.id;
+
+  const updated = await app.inject({
+    method: "PATCH", url: `/api/v1/accounts/${accountId}`, headers: auth(aliceToken),
+    payload: { expectedVersion: 1, changes: { name: "Main wallet" } },
+  });
+  assert.equal(updated.statusCode, 200);
+  assert.equal(updated.json().resource.syncVersion, 2);
+
+  const staleUpdate = await app.inject({
+    method: "PATCH", url: `/api/v1/accounts/${accountId}`, headers: auth(aliceToken),
+    payload: { expectedVersion: 1, changes: { name: "Stale name" } },
+  });
+  assert.equal(staleUpdate.statusCode, 409);
+  assert.equal(staleUpdate.json().error.code, "VERSION_CONFLICT");
+
+  const crossUserDelete = await app.inject({
+    method: "DELETE", url: `/api/v1/accounts/${accountId}`, headers: auth(bobToken),
+    payload: { expectedVersion: 2 },
+  });
+  assert.equal(crossUserDelete.statusCode, 404);
+
+  const deleted = await app.inject({
+    method: "DELETE", url: `/api/v1/accounts/${accountId}`, headers: auth(aliceToken),
+    payload: { expectedVersion: 2 },
+  });
+  assert.equal(deleted.statusCode, 200);
+  assert.equal(deleted.json().resource.syncVersion, 3);
+  assert.equal(typeof deleted.json().resource.deletedAt, "string");
+
+  const visible = await app.inject({
+    method: "GET", url: "/api/v1/accounts", headers: auth(aliceToken),
+  });
+  assert.deepEqual(visible.json().accounts, []);
+
+  const repeatedDelete = await app.inject({
+    method: "DELETE", url: `/api/v1/accounts/${accountId}`, headers: auth(aliceToken),
+    payload: { expectedVersion: 3 },
+  });
+  assert.equal(repeatedDelete.statusCode, 404);
 });
