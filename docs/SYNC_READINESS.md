@@ -6,7 +6,7 @@ Status: design/audit only. This document does not enable synchronization, deploy
 
 - Flutter app: `K3NYEL/finora`.
 - API: `K3NYEL/Finora-DataBase`, current API work on `feat/initial-api-and-validation` (draft PR #1).
-- API PR currently implements authenticated list/create endpoints. Update/delete, idempotency, cursor-based incremental sync, conflict resolution, and sync endpoints are not implemented.
+- API PR implements authenticated list/create endpoints, version-checked updates, and soft deletes. Cursor-based incremental sync, conflict-resolution policy, and dedicated sync endpoints are not implemented.
 
 ## Local schema observed
 
@@ -42,8 +42,8 @@ The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-uni
 
 1. Validate the app's v6 migration with Flutter tests and a copied pre-migration database; never test migrations against the live user database.
 2. Agree on the local ID strategy (recommended: add a stable UUID sync ID while preserving local integer IDs initially).
-3. [Schema groundwork added in migration v3; idempotent transaction/transfer creation added] Implement version-conflict checks, tombstone-aware reads/deletes, and incremental sync operations with authorization tests.
-4. Add owner-scoped update/delete and incremental pull/push operations with conflict handling and authorization tests.
+3. [Implemented in API branch] Version-checked PATCH, owner-scoped soft DELETE, and tombstone-aware normal list reads, with stale-version and cross-user tests.
+4. Define a stable incremental pull cursor and implement pull/push sync operations with conflict handling and authorization tests.
 5. Implement an explicit opt-in link flow and a dry-run preview (counts and conflicts) before any upload.
 6. Test offline retries, duplicate requests, cross-user access, deletion propagation, and migration rollback/recovery.
 7. Only after review, enable sync behind an explicit user setting. Do not deploy publicly until transport security, backups, monitoring, and account-linking design are verified.
