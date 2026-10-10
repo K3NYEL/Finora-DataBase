@@ -1,12 +1,14 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
+import { openDatabase } from "./database.js";
+import { registerAuthRoutes } from "./auth.js";
 
 function parseAllowedOrigins(raw: string | undefined): Set<string> {
   return new Set((raw ?? "").split(",").map((origin) => origin.trim()).filter(Boolean));
 }
 
-export async function buildApp(): Promise<FastifyInstance> {
+export async function buildApp(options: { databasePath?: string } = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       redact: [
@@ -14,6 +16,8 @@ export async function buildApp(): Promise<FastifyInstance> {
         "req.headers.cookie",
         "req.headers['set-cookie']",
         "*.password",
+        "*.password_hash",
+        "*.accessToken",
         "*.token",
         "*.secret",
       ],
@@ -22,6 +26,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     requestTimeout: 10_000,
     disableRequestLogging: true,
   });
+
+  const database = openDatabase(options.databasePath);
+  app.addHook("onClose", async () => database.close());
 
   await app.register(helmet);
   await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
@@ -47,6 +54,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.get("/api/v1/health", {
     config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
   }, async () => ({ status: "ok", service: "finora-database-api" }));
+
+  await registerAuthRoutes(app, database);
 
   app.setNotFoundHandler(async (_request, reply) =>
     reply.code(404).send({ error: { code: "NOT_FOUND", message: "Resource not found" } }),
