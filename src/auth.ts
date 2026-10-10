@@ -5,6 +5,7 @@ import type { ApiDatabase } from "./database.js";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const SCRYPT_KEY_LENGTH = 64;
 const SCRYPT_OPTIONS = { N: 16_384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+const DUMMY_PASSWORD_HASH = hashPassword("dummy-password-never-used-for-an-account");
 
 type Credentials = { username: string; password: string };
 
@@ -49,6 +50,7 @@ function publicUser(row: { id: string; username: string; created_at: string }) {
 function createSession(database: ApiDatabase, userId: string) {
   const token = randomBytes(32).toString("base64url");
   const now = new Date();
+  database.prepare("DELETE FROM api_sessions WHERE expires_at <= ? OR revoked_at IS NOT NULL").run(now.toISOString());
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
   database.prepare(`
     INSERT INTO api_sessions(id, user_id, token_hash, created_at, expires_at)
@@ -146,7 +148,8 @@ export async function registerAuthRoutes(app: FastifyInstance, database: ApiData
       | { id: string; username: string; password_hash: string; created_at: string }
       | undefined;
 
-    if (!row || !verifyPassword(credentials.password, row.password_hash)) {
+    const passwordValid = verifyPassword(credentials.password, row?.password_hash ?? DUMMY_PASSWORD_HASH);
+    if (!row || !passwordValid) {
       return reply.code(401).send({
         error: { code: "INVALID_LOGIN", message: "Username or password is incorrect" },
       });
