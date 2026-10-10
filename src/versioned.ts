@@ -100,7 +100,7 @@ export async function registerVersionedRoutes(app: FastifyInstance, database: Ap
     const user = await currentUser(request, reply, database);
     if (!user) return;
     const params = request.params as { resource?: string; id?: string };
-    if (!params.resource || !(params.resource in resources) || !params.id) {
+    if (!params.resource || !Object.hasOwn(resources, params.resource) || !params.id) {
       return sendError(reply, 404, "NOT_FOUND", "Resource not found");
     }
     const resource = params.resource as Resource;
@@ -117,11 +117,12 @@ export async function registerVersionedRoutes(app: FastifyInstance, database: Ap
       return sendError(reply, 400, "INVALID_UPDATE", "One or more fields are invalid or immutable");
     }
 
+    const databaseChanges = Object.fromEntries(entries.map(([key, value]) => [config.fields[key]!.column, value]));
     const run = database.transaction(() => {
       const row = ownedActive(database, resource, params.id!, user.id);
       if (!row) return { kind: "missing" as const };
       if (row.sync_version !== expectedVersion) return { kind: "conflict" as const, currentVersion: row.sync_version as number };
-      if (!validRelations(database, resource, changes, row, user.id)) return { kind: "relation" as const };
+      if (!validRelations(database, resource, databaseChanges, row, user.id)) return { kind: "relation" as const };
       const now = new Date().toISOString();
       const assignments = entries.map(([key]) => `${config.fields[key]!.column} = ?`);
       assignments.push("updated_at = ?", "sync_version = sync_version + 1");
