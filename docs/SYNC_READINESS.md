@@ -6,7 +6,7 @@ Status: design/audit only. This document does not enable synchronization, deploy
 
 - Flutter app: `K3NYEL/finora`.
 - API: `K3NYEL/Finora-DataBase`, current API work on `feat/initial-api-and-validation` (draft PR #1).
-- API PR implements authenticated list/create endpoints, version-checked updates, and soft deletes. Cursor-based incremental sync, conflict-resolution policy, and dedicated sync endpoints are not implemented.
+- API PR implements authenticated list/create endpoints, version-checked updates, and soft deletes. Cursor-based incremental sync, a complete conflict-resolution policy, and dedicated sync endpoints are not implemented.
 
 ## Local schema observed
 
@@ -21,7 +21,7 @@ This branch must be validated separately from `main`; do not assume v6 is releas
 
 ## API schema observed
 
-The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-unit amounts, and ISO timestamps:
+The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-unit amounts, ISO timestamps, and schema migration v3 sync metadata (`sync_version`, `deleted_at`, and `updated_at` for every financial table). It also stores idempotency responses for transaction/transfer creation:
 - `accounts`: `opening_balance_minor`, `currency_code`, `account_type`, `created_at`, `updated_at`.
 - `categories`: `kind`, `created_at`, `updated_at`.
 - `transactions`: `account_id`, optional `category_id`, `kind`, `amount_minor`, `occurred_at`, `description`, `created_at`.
@@ -34,8 +34,8 @@ The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-uni
 2. **Money:** the API accepts integer minor units. Use the local `*_minor` columns and validate their completeness; do not sync floating-point `REAL` amounts.
 3. **Field names and semantics:** `type` vs `kind`, `date` vs `occurred_at`, and transfer source/destination names need an explicit adapter. Confirm the exact local meanings before mapping.
 4. **Ownership:** local `user_id` is nullable and legacy records can remain unassigned. No record may be uploaded until a user explicitly links the local profile and confirms ownership/adoption.
-5. **Incremental changes:** the API currently lacks `updated_at`/deletion tombstones on transactions and transfers, stable idempotency keys, and a sync cursor/version. A retry could create duplicates and deletions could be resurrected.
-6. **Conflicts:** the API currently has no optimistic concurrency/version checks. Financial edits must not silently overwrite a newer version from another device.
+5. **Incremental changes:** tombstones, sync versions, update timestamps, and indexes now exist. Transaction/transfer creation requires an idempotency key, but account/category/budget creation is not yet idempotent and there is no sync cursor or endpoint yet.
+6. **Conflicts:** PATCH/DELETE now require `expectedVersion` and return 409 on stale writes. The app still needs a clear merge/conflict UX and a sync contract.
 7. **Account balance:** opening balance is not current balance. Current balance must be derived consistently from opening balance, transactions, and transfers.
 
 ## Safe implementation sequence
