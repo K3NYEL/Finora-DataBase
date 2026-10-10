@@ -6,6 +6,7 @@ import { registerAuthRoutes } from "./auth.js";
 import { registerFinanceRoutes } from "./finance.js";
 import { registerSyncRoutes } from "./sync.js";
 import { registerSyncPushRoutes } from "./sync_push.js";
+import { registerBackupRoutes } from "./backups.js";
 
 function parseAllowedOrigins(raw: string | undefined): Set<string> {
   return new Set((raw ?? "").split(",").map((origin) => origin.trim()).filter(Boolean));
@@ -14,7 +15,7 @@ function parseAllowedOrigins(raw: string | undefined): Set<string> {
 const allowedMethods = new Set(["GET", "POST", "PATCH", "DELETE"]);
 const allowedHeaders = new Set(["authorization", "content-type", "idempotency-key"]);
 
-export async function buildApp(options: { databasePath?: string } = {}): Promise<FastifyInstance> {
+export async function buildApp(options: { databasePath?: string; backupPath?: string } = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       redact: [
@@ -26,10 +27,11 @@ export async function buildApp(options: { databasePath?: string } = {}): Promise
         "*.accessToken",
         "*.token",
         "*.secret",
+        "*.ciphertext",
       ],
     },
     bodyLimit: 64 * 1024,
-    requestTimeout: 10_000,
+    requestTimeout: 30_000,
   });
 
   const database = openDatabase(options.databasePath);
@@ -89,6 +91,7 @@ export async function buildApp(options: { databasePath?: string } = {}): Promise
   await registerFinanceRoutes(app, database);
   await registerSyncRoutes(app, database);
   await registerSyncPushRoutes(app, database);
+  await registerBackupRoutes(app, database, options.backupPath);
 
   app.setNotFoundHandler(async (_request, reply) =>
     reply.code(404).send({ error: { code: "NOT_FOUND", message: "Resource not found" } }),
