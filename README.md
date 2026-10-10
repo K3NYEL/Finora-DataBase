@@ -19,8 +19,9 @@ Registration/login currently use a username (3–32 characters: letters, numbers
 - Exact-origin allowlist via `CORS_ORIGINS`
 - Redaction of authorization and credential-related fields in logs
 - Generic JSON error responses
-- SQLite foreign-key enforcement, WAL mode, busy timeout, and restrictive file permissions where supported
-- Automated tests, TypeScript type-check, and build in GitHub Actions
+- Transactional, versioned SQLite migrations; foreign-key enforcement, WAL mode, busy timeout, and restrictive database-file permissions where supported
+- Automated tests for CORS preflight policy, session expiry/revocation, registration rate limits, and token-hash storage; TypeScript type-check and build in GitHub Actions
+- Locked npm dependency tree with reproducible `npm ci` installs
 
 The server binds to `127.0.0.1:3000` by default. SQLite storage defaults to `./data/finora.db`; the database and its sidecar files must not be committed or served as static files.
 
@@ -29,7 +30,7 @@ The server binds to `127.0.0.1:3000` by default. SQLite storage defaults to `./d
 Requirements: Node.js 22 or newer and npm.
 
 ```bash
-npm install
+npm ci
 cp .env.example .env
 npm run dev
 ```
@@ -53,6 +54,7 @@ Use the returned `accessToken` as `Authorization: Bearer <token>` for `/api/v1/a
 Run checks:
 
 ```bash
+npm ci
 npm test
 npm run typecheck
 npm run build
