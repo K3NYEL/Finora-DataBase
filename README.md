@@ -9,6 +9,11 @@ Backend API foundation for Finora, built with Node.js 22, TypeScript, Fastify, a
 - `POST /api/v1/auth/login` — authenticate and create a session
 - `GET /api/v1/auth/me` — return the authenticated account
 - `POST /api/v1/auth/logout` — revoke the current bearer session
+- `GET/POST /api/v1/accounts` — list/create the authenticated user's financial accounts
+- `GET/POST /api/v1/categories` — list/create income and expense categories
+- `GET/POST /api/v1/transactions` — list/create income and expense movements
+- `GET/POST /api/v1/transfers` — list/create transfers between the user's own accounts
+- `GET/POST /api/v1/budgets` — list/create budgets tied to the user's own expense categories
 
 Registration/login currently use a username (3–32 characters: letters, numbers, dot, underscore, hyphen) and a password of 12–128 characters. Passwords are stored as scrypt hashes with random salts; session tokens are random, expire after 30 days, and only their SHA-256 hashes are stored in SQLite. Authentication endpoints have dedicated rate limits.
 
@@ -19,8 +24,10 @@ Registration/login currently use a username (3–32 characters: letters, numbers
 - Exact-origin allowlist via `CORS_ORIGINS`
 - Redaction of authorization and credential-related fields in logs
 - Generic JSON error responses
-- Transactional, versioned SQLite migrations; foreign-key enforcement, WAL mode, busy timeout, and restrictive database-file permissions where supported
-- Automated tests for CORS preflight policy, session expiry/revocation, registration rate limits, and token-hash storage; TypeScript type-check and build in GitHub Actions
+- Transactional, versioned SQLite migrations (v1 auth/session tables; v2 financial tables); foreign-key enforcement, WAL mode, busy timeout, and restrictive database-file permissions where supported
+- Composite foreign keys tie each transaction, transfer, and budget reference to the same owner; API queries filter by the authenticated session user, not a client-supplied owner ID
+- Money values use positive integer minor units for movements and budgets; account opening balances are integer minor units
+- Automated tests for CORS preflight policy, session expiry/revocation, registration rate limits, token-hash storage, and cross-user financial access; TypeScript type-check and build in GitHub Actions
 - Locked npm dependency tree with reproducible `npm ci` installs
 
 The server binds to `127.0.0.1:3000` by default. SQLite storage defaults to `./data/finora.db`; the database and its sidecar files must not be committed or served as static files.
@@ -70,9 +77,13 @@ npm start
 
 Never commit `.env`, SQLite database files, credentials, tokens, or production secrets.
 
+## Current financial API scope
+
+The first financial API iteration provides list/create endpoints only. It intentionally does not yet support update/delete, pagination cursors, conflict resolution, balance summaries, idempotency keys, or client synchronization. Account balances must be derived from opening balances plus movements and transfers; do not treat stored opening balances as current balances.
+
 ## Not implemented yet
 
-- Financial-data endpoints and sync
+- Client synchronization and conflict resolution
 - Linking API accounts to existing local Finora profiles
 - Password reset, session listing/revocation across devices, and account recovery
 - Production HTTPS, monitoring, backups, and deployment configuration
