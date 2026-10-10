@@ -155,3 +155,19 @@ test("authenticated profile works and logout revokes the bearer session", async 
   });
   assert.equal(revoked.statusCode, 401);
 });
+
+test("valid login creates a separate session for the existing account", async () => {
+  const register = await app.inject({
+    method: "POST", url: "/api/v1/auth/register",
+    payload: { username: "finora_user", password },
+  });
+  assert.equal(register.statusCode, 201);
+
+  const login = await app.inject({
+    method: "POST", url: "/api/v1/auth/login",
+    payload: { username: "FINORA_USER", password },
+  });
+  assert.equal(login.statusCode, 200);
+  assert.equal(login.json().user.id, register.json().user.id);
+  assert.notEqual(login.json().accessToken, register.json().accessToken);
+});
