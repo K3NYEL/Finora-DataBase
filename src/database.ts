@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, closeSync, mkdirSync, openSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
 
@@ -77,6 +77,13 @@ export function openDatabase(filePath = process.env.DATABASE_PATH ?? "./data/fin
   const absolutePath = isMemoryDatabase ? ":memory:" : resolve(filePath);
   if (!isMemoryDatabase) {
     mkdirSync(dirname(absolutePath), { recursive: true, mode: 0o700 });
+    const descriptor = openSync(absolutePath, "a", 0o600);
+    closeSync(descriptor);
+    try {
+      chmodSync(absolutePath, 0o600);
+    } catch {
+      // Some filesystems do not support POSIX file modes.
+    }
   }
 
   const database = new Database(absolutePath);
@@ -86,13 +93,6 @@ export function openDatabase(filePath = process.env.DATABASE_PATH ?? "./data/fin
     database.pragma("busy_timeout = 5000");
     applyMigrations(database);
 
-    if (!isMemoryDatabase) {
-      try {
-        chmodSync(absolutePath, 0o600);
-      } catch {
-        // Some filesystems do not support POSIX file modes.
-      }
-    }
     return database;
   } catch (error) {
     database.close();
