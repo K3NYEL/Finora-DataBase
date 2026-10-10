@@ -172,7 +172,7 @@ test("database migrations are recorded and safely re-run", async () => {
   try {
     const migration = database.prepare("SELECT MAX(version) AS version FROM schema_migrations")
       .get() as { version: number };
-    assert.equal(migration.version, 3);
+    assert.equal(migration.version, 4);
     assert.equal(database.pragma("foreign_keys", { simple: true }), 1);
   } finally {
     database.close();
@@ -182,7 +182,7 @@ test("database migrations are recorded and safely re-run", async () => {
   try {
     const rows = reopened.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as
       Array<{ version: number }>;
-    assert.deepEqual(rows, [{ version: 1 }, { version: 2 }, { version: 3 }]);
+    assert.deepEqual(rows, [{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }]);
   } finally {
     reopened.close();
   }
@@ -722,4 +722,66 @@ test("versioned deletes refuse to hide accounts that still have active financial
   });
   assert.equal(deleted.statusCode, 409);
   assert.equal(deleted.json().error.code, "RESOURCE_IN_USE");
+});
+
+
+test("incremental sync pages changes by a monotonic cursor and includes tombstones", async () => {
+  const register = await app.inject({
+    method: "POST", url: "/api/v1/auth/register",
+    payload: { username: "sync_owner", password },
+  });
+  assert.equal(register.statusCode, 201);
+  const token = register.json().accessToken as string;
+  const headers = { authorization: `Bearer ${token}` };
+
+  const invalidCursor = await app.inject({
+    method: "GET", url: "/api/v1/sync/changes?cursor=-1", headers,
+  });
+  assert.equal(invalidCursor.statusCode, 400);
+
+  const first = await app.inject({
+    method: "POST", url: "/api/v1/accounts", headers,
+    payload: { name: "Wallet one", type: "cash", currencyCode: "DOP" },
+  });
+  const second = await app.inject({
+    method: "POST", url: "/api/v1/accounts", headers,
+    payload: { name: "Wallet two", type: "bank", currencyCode: "DOP" },
+  });
+  assert.equal(first.statusCode, 201);
+  assert.equal(second.statusCode, 201);
+
+  const page1 = await app.inject({
+    method: "GET", url: "/api/v1/sync/changes?cursor=0&limit=1", headers,
+  });
+  assert.equal(page1.statusCode, 200);
+  assert.equal(page1.json().changes.length, 1);
+  assert.equal(page1.json().hasMore, true);
+  const cursor1 = page1.json().nextCursor as number;
+
+  const page2 = await app.inject({
+    method: "GET", url: `/api/v1/sync/changes?cursor=${cursor1}&limit=1`, headers,
+  });
+  assert.equal(page2.statusCode, 200);
+  assert.equal(page2.json().changes.length, 1);
+  assert.equal(page2.json().hasMore, false);
+  assert.ok(page2.json().nextCursor > cursor1);
+
+  const accountId = first.json().account.id as string;
+  const deleted = await app.inject({
+    method: "DELETE", url: `/api/v1/accounts/${accountId}`, headers,
+    payload: { expectedVersion: 1 },
+  });
+  assert.equal(deleted.statusCode, 200);
+
+  const changesAfterDelete = await app.inject({
+    method: "GET", url: `/api/v1/sync/changes?cursor=${page2.json().nextCursor}`, headers,
+  });
+  assert.equal(changesAfterDelete.statusCode, 200);
+  const tombstone = changesAfterDelete.json().changes.find(
+    (change: { resource: string; data: { id: string } }) =>
+      change.resource === "accounts" && change.data.id === accountId,
+  );
+  assert.ok(tombstone);
+  assert.equal(typeof tombstone.data.deletedAt, "string");
+  assert.equal(tombstone.data.syncVersion, 2);
 });
