@@ -14,7 +14,7 @@ type Credentials = { username: string; password: string };
 async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
   const hash = await scryptAsync(password, salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS) as Buffer;
-  return `scrypt${salt.toString("base64url")}${hash.toString("base64url")}`;
+  return `scrypt$${salt.toString("base64url")}$${hash.toString("base64url")}`;
 }
 
 async function verifyPassword(password: string, stored: string): Promise<boolean> {
