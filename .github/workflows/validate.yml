@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   validate:
-    name: Type-check and build API
+    name: Test, type-check and build API
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -27,6 +27,8 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Run API tests
+        run: npm test
       - name: Type-check
         run: npm run typecheck
       - name: Build
