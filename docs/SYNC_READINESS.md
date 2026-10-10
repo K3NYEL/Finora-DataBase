@@ -21,7 +21,7 @@ This branch must be validated separately from `main`; do not assume v6 is releas
 
 ## API schema observed
 
-The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-unit amounts, ISO timestamps, and schema migration v3 sync metadata (`sync_version`, `deleted_at`, and `updated_at` for every financial table). It also stores idempotency responses for transaction/transfer creation:
+The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-unit amounts, ISO timestamps, and schema migration v4 sync metadata (`sync_version`, `deleted_at`, `updated_at`, and monotonic `sync_seq` for every financial table). It also stores idempotency responses for transaction/transfer creation:
 - `accounts`: `opening_balance_minor`, `currency_code`, `account_type`, `created_at`, `updated_at`.
 - `categories`: `kind`, `created_at`, `updated_at`.
 - `transactions`: `account_id`, optional `category_id`, `kind`, `amount_minor`, `occurred_at`, `description`, `created_at`.
