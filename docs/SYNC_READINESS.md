@@ -54,3 +54,7 @@ The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-uni
 - No deployment or public server exposure.
 - No changes to production user data.
 - No merging of draft PRs or release creation.
+
+## Flutter adapter progress (separate draft PR)
+
+The Flutter integration branch `K3NYEL/finora#28` now contains a draft migration v7 that adds stable UUID `sync_id` columns while preserving local integer primary keys, reserves `remote_sync_version`, and initializes a singleton checkpoint with sync disabled. A read-only readiness gate checks explicit local/remote account linkage, disabled-by-default sync, unresolved legacy ownership, missing IDs, and transactions that still reference shared built-in categories. These changes are still under CI/review; they do not enable upload, create an outbox, or connect the app to this API.
