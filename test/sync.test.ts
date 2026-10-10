@@ -41,6 +41,12 @@ test("incremental changes paginate and include the latest tombstone without leak
   assert.equal(aliceCreated.statusCode, 201);
   const aliceId = aliceCreated.json().account.id as string;
 
+  const aliceSecondCreated = await app.inject({
+    method: "POST", url: "/api/v1/accounts", headers: auth(alice),
+    payload: { name: "Savings", type: "savings", currencyCode: "DOP" },
+  });
+  assert.equal(aliceSecondCreated.statusCode, 201);
+
   const bobCreated = await app.inject({
     method: "POST", url: "/api/v1/accounts", headers: auth(bob),
     payload: { name: "Bob wallet", type: "cash", currencyCode: "DOP" },
