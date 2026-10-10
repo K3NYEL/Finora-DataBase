@@ -174,8 +174,8 @@ test("database migrations are recorded and safely re-run", async () => {
 
   const reopened = openDatabase(databasePath);
   try {
-    const rows = reopened.prepare("SELECT version FROM schema_migrations ORDER BY version").all()
-      as Array<{ version: number }>;
+    const rows = reopened.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as
+      Array<{ version: number }>;
     assert.deepEqual(rows, [{ version: 1 }]);
   } finally {
     reopened.close();
