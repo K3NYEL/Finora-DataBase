@@ -77,7 +77,7 @@ function validRelations(database: ApiDatabase, resource: Resource, changes: Reco
     if (!owns("accounts", merged.account_id)) return false;
     if (merged.category_id !== null && merged.category_id !== undefined) {
       const category = database.prepare("SELECT kind FROM categories WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
-        .get(merged.category_id, userId) as { kind: string } | undefined;
+        .get(merged.category_id as string, userId) as { kind: string } | undefined;
       if (!category || category.kind !== merged.kind) return false;
     }
   }
@@ -87,7 +87,7 @@ function validRelations(database: ApiDatabase, resource: Resource, changes: Reco
   }
   if (resource === "budgets") {
     const category = database.prepare("SELECT kind FROM categories WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
-      .get(merged.category_id, userId) as { kind: string } | undefined;
+      .get(merged.category_id as string, userId) as { kind: string } | undefined;
     if (!category || category.kind !== "expense") return false;
     if (typeof merged.period_start !== "string" || typeof merged.period_end !== "string" ||
         merged.period_end < merged.period_start) return false;
@@ -133,14 +133,14 @@ export async function registerVersionedRoutes(app: FastifyInstance, database: Ap
       const result = database.prepare(`
         UPDATE ${resource} SET ${assignments.join(", ")}
         WHERE id = ? AND user_id = ? AND sync_version = ? AND deleted_at IS NULL
-      `).run(...values, now, params.id, user.id, expectedVersion);
+      `).run(...values as (string | number | null)[], now, params.id, user.id, expectedVersion as number);
       if (result.changes !== 1) return { kind: "conflict" as const };
       return { kind: "ok" as const, id: params.id, syncVersion: (expectedVersion as number) + 1, updatedAt: now };
     });
     try {
       const result = run();
       if (result.kind === "missing") return sendError(reply, 404, "RESOURCE_NOT_FOUND", "Resource not found");
-      if (result.kind === "conflict") return reply.code(409).send({ error: { code: "VERSION_CONFLICT", message: "Resource changed; fetch the latest version before retrying" }, currentVersion: result.currentVersion });
+      if (result.kind === "conflict") return reply.code(409).send({ error: { code: "VERSION_CONFLICT", message: "Resource changed; fetch the latest version before retrying" }, currentVersion: "currentVersion" in result ? result.currentVersion : undefined });
       if (result.kind === "relation") return sendError(reply, 404, "RELATED_RESOURCE_NOT_FOUND", "A related resource was not found or is incompatible");
       return reply.send({ resource: result });
     } catch (cause) {
@@ -190,7 +190,7 @@ export async function registerVersionedRoutes(app: FastifyInstance, database: Ap
         UPDATE ${resource}
         SET deleted_at = ?, updated_at = ?, sync_version = sync_version + 1
         WHERE id = ? AND user_id = ? AND sync_version = ? AND deleted_at IS NULL
-      `).run(now, now, params.id, user.id, expectedVersion);
+      `).run(now, now, params.id, user.id, expectedVersion as number);
       if (result.changes !== 1) return { kind: "conflict" as const };
       return { kind: "ok" as const, id: params.id, syncVersion: (expectedVersion as number) + 1, deletedAt: now };
     });
