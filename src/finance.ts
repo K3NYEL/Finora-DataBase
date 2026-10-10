@@ -4,6 +4,7 @@ import type { ApiDatabase } from "./database.js";
 import { requireUser } from "./auth.js";
 import { executeIdempotently } from "./idempotency.js";
 import { registerVersionedRoutes } from "./versioned.js";
+import { registerSyncRoutes } from "./sync.js";
 
 type AuthenticatedUser = { id: string; username: string; created_at: string };
 type JsonObject = Record<string, unknown>;
@@ -316,4 +317,5 @@ export async function registerFinanceRoutes(app: FastifyInstance, database: ApiD
   });
 
   await registerVersionedRoutes(app, database);
+  await registerSyncRoutes(app, database);
 }
