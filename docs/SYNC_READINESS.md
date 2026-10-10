@@ -42,7 +42,7 @@ The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-uni
 
 1. Validate the app's v6 migration with Flutter tests and a copied pre-migration database; never test migrations against the live user database.
 2. Agree on the local ID strategy (recommended: add a stable UUID sync ID while preserving local integer IDs initially).
-3. Add API schema fields for sync versions/timestamps/tombstones and idempotency, with transactional migrations and tests.
+3. [Schema groundwork added in migration v3] Implement route behavior for sync versions/timestamps/tombstones and idempotency, with transactional operations and tests.
 4. Add owner-scoped update/delete and incremental pull/push operations with conflict handling and authorization tests.
 5. Implement an explicit opt-in link flow and a dry-run preview (counts and conflicts) before any upload.
 6. Test offline retries, duplicate requests, cross-user access, deletion propagation, and migration rollback/recovery.
