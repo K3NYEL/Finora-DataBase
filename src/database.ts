@@ -5,8 +5,9 @@ import Database from "better-sqlite3";
 export type ApiDatabase = InstanceType<typeof Database>;
 
 export function openDatabase(filePath = process.env.DATABASE_PATH ?? "./data/finora.db"): ApiDatabase {
-  const absolutePath = resolve(filePath);
-  if (absolutePath !== ":memory:") {
+  const isMemoryDatabase = filePath === ":memory:";
+  const absolutePath = isMemoryDatabase ? ":memory:" : resolve(filePath);
+  if (!isMemoryDatabase) {
     mkdirSync(dirname(absolutePath), { recursive: true, mode: 0o700 });
   }
 
@@ -46,7 +47,7 @@ export function openDatabase(filePath = process.env.DATABASE_PATH ?? "./data/fin
     "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
   ).run(1, new Date().toISOString());
 
-  if (absolutePath !== ":memory:") {
+  if (!isMemoryDatabase) {
     try {
       chmodSync(absolutePath, 0o600);
     } catch {
