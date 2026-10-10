@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiDatabase } from "./database.js";
 import { requireUser } from "./auth.js";
 import { executeIdempotently } from "./idempotency.js";
+import { registerVersionedRoutes } from "./versioned.js";
 
 type AuthenticatedUser = { id: string; username: string; created_at: string };
 type JsonObject = Record<string, unknown>;
@@ -77,8 +78,8 @@ export async function registerFinanceRoutes(app: FastifyInstance, database: ApiD
     const accounts = database.prepare(`
       SELECT id, name, account_type AS type, currency_code AS currencyCode,
         opening_balance_minor AS openingBalanceMinor, created_at AS createdAt,
-        updated_at AS updatedAt
-      FROM accounts WHERE user_id = ? ORDER BY created_at, id LIMIT 500
+        updated_at AS updatedAt, sync_version AS syncVersion
+      FROM accounts WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at, id LIMIT 500
     `).all(user.id);
     return reply.send({ accounts });
   });
@@ -112,8 +113,9 @@ export async function registerFinanceRoutes(app: FastifyInstance, database: ApiD
     const user = await authenticated(request, reply, database);
     if (!user) return;
     const categories = database.prepare(`
-      SELECT id, name, kind, created_at AS createdAt, updated_at AS updatedAt
-      FROM categories WHERE user_id = ? ORDER BY kind, name COLLATE NOCASE, id LIMIT 500
+      SELECT id, name, kind, created_at AS createdAt, updated_at AS updatedAt,
+        sync_version AS syncVersion
+      FROM categories WHERE user_id = ? AND deleted_at IS NULL ORDER BY kind, name COLLATE NOCASE, id LIMIT 500
     `).all(user.id);
     return reply.send({ categories });
   });
@@ -150,8 +152,9 @@ export async function registerFinanceRoutes(app: FastifyInstance, database: ApiD
     const transactions = database.prepare(`
       SELECT id, account_id AS accountId, category_id AS categoryId, kind,
         amount_minor AS amountMinor, occurred_at AS occurredAt,
-        description, created_at AS createdAt
-      FROM transactions WHERE user_id = ? ORDER BY occurred_at DESC, id LIMIT 500
+        description, created_at AS createdAt, updated_at AS updatedAt,
+        sync_version AS syncVersion
+      FROM transactions WHERE user_id = ? AND deleted_at IS NULL ORDER BY occurred_at DESC, id LIMIT 500
     `).all(user.id);
     return reply.send({ transactions });
   });
@@ -214,8 +217,9 @@ export async function registerFinanceRoutes(app: FastifyInstance, database: ApiD
     const transfers = database.prepare(`
       SELECT id, from_account_id AS fromAccountId, to_account_id AS toAccountId,
         amount_minor AS amountMinor, occurred_at AS occurredAt,
-        description, created_at AS createdAt
-      FROM transfers WHERE user_id = ? ORDER BY occurred_at DESC, id LIMIT 500
+        description, created_at AS createdAt, updated_at AS updatedAt,
+        sync_version AS syncVersion
+      FROM transfers WHERE user_id = ? AND deleted_at IS NULL ORDER BY occurred_at DESC, id LIMIT 500
     `).all(user.id);
     return reply.send({ transfers });
   });
@@ -272,8 +276,8 @@ export async function registerFinanceRoutes(app: FastifyInstance, database: ApiD
     const budgets = database.prepare(`
       SELECT id, category_id AS categoryId, amount_minor AS amountMinor,
         period_start AS periodStart, period_end AS periodEnd,
-        created_at AS createdAt, updated_at AS updatedAt
-      FROM budgets WHERE user_id = ? ORDER BY period_start DESC, id LIMIT 500
+        created_at AS createdAt, updated_at AS updatedAt, sync_version AS syncVersion
+      FROM budgets WHERE user_id = ? AND deleted_at IS NULL ORDER BY period_start DESC, id LIMIT 500
     `).all(user.id);
     return reply.send({ budgets });
   });
@@ -310,4 +314,6 @@ export async function registerFinanceRoutes(app: FastifyInstance, database: ApiD
       budget: { id, categoryId, amountMinor, periodStart, periodEnd, createdAt: now, updatedAt: now },
     });
   });
+
+  await registerVersionedRoutes(app, database);
 }
