@@ -27,6 +27,11 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Export generated lockfile for repository lock-in
+        run: |
+          echo "FINORA_LOCKFILE_START"
+          cat package-lock.json
+          echo "FINORA_LOCKFILE_END"
       - name: Run API tests
         run: npm test
       - name: Type-check
