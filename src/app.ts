@@ -9,7 +9,7 @@ function parseAllowedOrigins(raw: string | undefined): Set<string> {
   return new Set((raw ?? "").split(",").map((origin) => origin.trim()).filter(Boolean));
 }
 
-const allowedMethods = new Set(["GET", "POST"]);
+const allowedMethods = new Set(["GET", "POST", "PATCH", "DELETE"]);
 const allowedHeaders = new Set(["authorization", "content-type", "idempotency-key"]);
 
 export async function buildApp(options: { databasePath?: string } = {}): Promise<FastifyInstance> {
@@ -72,7 +72,7 @@ export async function buildApp(options: { databasePath?: string } = {}): Promise
     if (origin) {
       reply.header("Access-Control-Allow-Origin", origin);
       reply.header("Vary", "Origin");
-      reply.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      reply.header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
       reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key");
     }
   });
