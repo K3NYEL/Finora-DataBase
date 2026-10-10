@@ -86,3 +86,21 @@ test("batch push cannot update another user's resource", async () => {
   const list=await app.inject({method:"GET",url:"/api/v1/accounts",headers:{authorization:"Bearer "+owner}});
   assert.equal(list.json().accounts[0].name,"Private");
 });
+
+test("batch push cannot change a category kind while financial records depend on it", async () => {
+  const token=await register("push_category_kind"), headers={authorization:"Bearer "+token};
+  const account=await app.inject({method:"POST",url:"/api/v1/accounts",headers,payload:{name:"Daily",type:"cash",currencyCode:"DOP"}});
+  const category=await app.inject({method:"POST",url:"/api/v1/categories",headers,payload:{name:"Food",kind:"expense"}});
+  const transaction=await app.inject({method:"POST",url:"/api/v1/transactions",headers:{...headers,"idempotency-key":"push-category-tx-0001"},payload:{
+    accountId:account.json().account.id,categoryId:category.json().category.id,kind:"expense",amountMinor:500,
+    occurredAt:"2026-10-10T12:00:00.000Z",description:"Meal",
+  }});
+  assert.equal(transaction.statusCode,201);
+  const response=await app.inject({method:"POST",url:"/api/v1/sync/push",headers:{...headers,"idempotency-key":"sync-push-kind-change-1"},payload:{operations:[
+    {opId:"change-category-kind",action:"update",resource:"categories",id:category.json().category.id,expectedVersion:1,changes:{kind:"income"}},
+  ]}});
+  assert.equal(response.statusCode,409);
+  assert.equal(response.json().error.code,"RESOURCE_IN_USE");
+  const listed=await app.inject({method:"GET",url:"/api/v1/categories",headers});
+  assert.equal(listed.json().categories[0].kind,"expense");
+});
