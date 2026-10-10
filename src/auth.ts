@@ -30,7 +30,7 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
     const salt = Buffer.from(parts[1]!, "base64url");
     const expected = Buffer.from(parts[2]!, "base64url");
     if (salt.length !== 16 || expected.length !== SCRYPT_KEY_LENGTH) return false;
-    const actual = await scryptAsync(password, salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS) as Buffer;
+    const actual = await scryptAsync(password, salt, SCRYPT_KEY_LENGTH) as Buffer;
     return timingSafeEqual(actual, expected);
   } catch {
     return false;
