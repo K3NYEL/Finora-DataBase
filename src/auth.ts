@@ -74,7 +74,7 @@ function getBearerToken(request: FastifyRequest): string | null {
   return match?.[1] ?? null;
 }
 
-async function requireUser(
+export async function requireUser(
   request: FastifyRequest,
   reply: FastifyReply,
   database: ApiDatabase,
