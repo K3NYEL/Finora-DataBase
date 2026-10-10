@@ -3,6 +3,7 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { openDatabase } from "./database.js";
 import { registerAuthRoutes } from "./auth.js";
+import { registerFinanceRoutes } from "./finance.js";
 
 function parseAllowedOrigins(raw: string | undefined): Set<string> {
   return new Set((raw ?? "").split(",").map((origin) => origin.trim()).filter(Boolean));
@@ -83,6 +84,7 @@ export async function buildApp(options: { databasePath?: string } = {}): Promise
   }, async () => ({ status: "ok", service: "finora-database-api" }));
 
   await registerAuthRoutes(app, database);
+  await registerFinanceRoutes(app, database);
 
   app.setNotFoundHandler(async (_request, reply) =>
     reply.code(404).send({ error: { code: "NOT_FOUND", message: "Resource not found" } }),
