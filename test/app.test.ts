@@ -628,3 +628,98 @@ test("versioned routes do not allow modifying or deleting another user's records
   });
   assert.equal(list.json().accounts[0].name, "Private");
 });
+
+
+test("versioned updates reject stale and cross-user writes, and deletes create hidden tombstones", async () => {
+  const registerUser = async (username: string) => {
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/auth/register",
+      payload: { username, password },
+    });
+    assert.equal(response.statusCode, 201);
+    return response.json().accessToken as string;
+  };
+  const aliceToken = await registerUser("version_alice");
+  const bobToken = await registerUser("version_bob");
+  const auth = (token: string) => ({ authorization: `Bearer ${token}` });
+
+  const created = await app.inject({
+    method: "POST", url: "/api/v1/accounts", headers: auth(aliceToken),
+    payload: { name: "Everyday", type: "cash", currencyCode: "DOP", openingBalanceMinor: 2500 },
+  });
+  assert.equal(created.statusCode, 201);
+  const accountId = created.json().account.id as string;
+
+  const crossUser = await app.inject({
+    method: "PATCH", url: `/api/v1/accounts/${accountId}`, headers: auth(bobToken),
+    payload: { expectedVersion: 1, changes: { name: "Stolen" } },
+  });
+  assert.equal(crossUser.statusCode, 404);
+
+  const updated = await app.inject({
+    method: "PATCH", url: `/api/v1/accounts/${accountId}`, headers: auth(aliceToken),
+    payload: { expectedVersion: 1, changes: { name: "Daily" } },
+  });
+  assert.equal(updated.statusCode, 200);
+  assert.equal(updated.json().resource.syncVersion, 2);
+
+  const stale = await app.inject({
+    method: "PATCH", url: `/api/v1/accounts/${accountId}`, headers: auth(aliceToken),
+    payload: { expectedVersion: 1, changes: { name: "Old update" } },
+  });
+  assert.equal(stale.statusCode, 409);
+  assert.equal(stale.json().error.code, "VERSION_CONFLICT");
+
+  const deleted = await app.inject({
+    method: "DELETE", url: `/api/v1/accounts/${accountId}`, headers: auth(aliceToken),
+    payload: { expectedVersion: 2 },
+  });
+  assert.equal(deleted.statusCode, 200);
+  assert.equal(deleted.json().resource.syncVersion, 3);
+
+  const list = await app.inject({
+    method: "GET", url: "/api/v1/accounts", headers: auth(aliceToken),
+  });
+  assert.deepEqual(list.json().accounts, []);
+
+  const database = openDatabase(databasePath);
+  try {
+    const row = database.prepare("SELECT deleted_at, sync_version FROM accounts WHERE id = ?")
+      .get(accountId) as { deleted_at: string | null; sync_version: number };
+    assert.equal(typeof row.deleted_at, "string");
+    assert.equal(row.sync_version, 3);
+  } finally {
+    database.close();
+  }
+});
+
+test("versioned deletes refuse to hide accounts that still have active financial records", async () => {
+  const register = await app.inject({
+    method: "POST", url: "/api/v1/auth/register",
+    payload: { username: "version_owner", password },
+  });
+  assert.equal(register.statusCode, 201);
+  const token = register.json().accessToken as string;
+  const headers = { authorization: `Bearer ${token}` };
+  const account = await app.inject({
+    method: "POST", url: "/api/v1/accounts", headers,
+    payload: { name: "Wallet", type: "cash", currencyCode: "DOP" },
+  });
+  const accountId = account.json().account.id as string;
+  const transaction = await app.inject({
+    method: "POST", url: "/api/v1/transactions",
+    headers: { ...headers, "idempotency-key": "delete-guard-tx-001" },
+    payload: {
+      accountId, kind: "expense", amountMinor: 100,
+      occurredAt: "2026-10-10T12:00:00.000Z", description: "Coffee",
+    },
+  });
+  assert.equal(transaction.statusCode, 201);
+
+  const deleted = await app.inject({
+    method: "DELETE", url: `/api/v1/accounts/${accountId}`, headers,
+    payload: { expectedVersion: 1 },
+  });
+  assert.equal(deleted.statusCode, 409);
+  assert.equal(deleted.json().error.code, "RESOURCE_IN_USE");
+});
