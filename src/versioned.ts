@@ -155,7 +155,7 @@ export async function registerVersionedRoutes(app: FastifyInstance, database: Ap
     const user = await currentUser(request, reply, database);
     if (!user) return;
     const params = request.params as { resource?: string; id?: string };
-    if (!params.resource || !(params.resource in resources) || !params.id) {
+    if (!params.resource || !Object.hasOwn(resources, params.resource) || !params.id) {
       return sendError(reply, 404, "NOT_FOUND", "Resource not found");
     }
     const body = bodyObject(request.body);
