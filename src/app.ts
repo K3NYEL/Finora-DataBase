@@ -8,6 +8,9 @@ function parseAllowedOrigins(raw: string | undefined): Set<string> {
   return new Set((raw ?? "").split(",").map((origin) => origin.trim()).filter(Boolean));
 }
 
+const allowedMethods = new Set(["GET", "POST"]);
+const allowedHeaders = new Set(["authorization", "content-type"]);
+
 export async function buildApp(options: { databasePath?: string } = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -45,6 +48,26 @@ export async function buildApp(options: { databasePath?: string } = {}): Promise
         error: { code: "ORIGIN_NOT_ALLOWED", message: "Origin not allowed" },
       });
     }
+
+    if (request.method === "OPTIONS") {
+      const requestedMethod = request.headers["access-control-request-method"]?.toUpperCase();
+      if (requestedMethod && !allowedMethods.has(requestedMethod)) {
+        return reply.code(403).send({
+          error: { code: "PREFLIGHT_NOT_ALLOWED", message: "Requested method is not allowed" },
+        });
+      }
+
+      const requestedHeaders = (request.headers["access-control-request-headers"] ?? "")
+        .split(",")
+        .map((header) => header.trim().toLowerCase())
+        .filter(Boolean);
+      if (requestedHeaders.some((header) => !allowedHeaders.has(header))) {
+        return reply.code(403).send({
+          error: { code: "PREFLIGHT_NOT_ALLOWED", message: "Requested headers are not allowed" },
+        });
+      }
+    }
+
     if (origin) {
       reply.header("Access-Control-Allow-Origin", origin);
       reply.header("Vary", "Origin");
