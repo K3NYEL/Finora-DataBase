@@ -125,6 +125,47 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    apply(database) {
+      // Keep existing IDs and rows intact. Deletions become tombstones so
+      // future sync clients can observe them before physical cleanup.
+      for (const table of ["accounts", "categories", "transactions", "transfers", "budgets"]) {
+        database.exec(`ALTER TABLE ${table} ADD COLUMN sync_version INTEGER NOT NULL DEFAULT 1 CHECK(sync_version >= 1)`);
+        database.exec(`ALTER TABLE ${table} ADD COLUMN deleted_at TEXT`);
+      }
+
+      database.exec(`
+        ALTER TABLE transactions ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+        ALTER TABLE transfers ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+        UPDATE transactions SET updated_at = created_at WHERE updated_at = '';
+        UPDATE transfers SET updated_at = created_at WHERE updated_at = '';
+
+        CREATE INDEX idx_accounts_user_sync ON accounts(user_id, updated_at, id);
+        CREATE INDEX idx_categories_user_sync ON categories(user_id, updated_at, id);
+        CREATE INDEX idx_transactions_user_sync ON transactions(user_id, updated_at, id);
+        CREATE INDEX idx_transfers_user_sync ON transfers(user_id, updated_at, id);
+        CREATE INDEX idx_budgets_user_sync ON budgets(user_id, updated_at, id);
+
+        CREATE TABLE api_idempotency_keys (
+          user_id TEXT NOT NULL REFERENCES api_users(id) ON DELETE CASCADE,
+          idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 8 AND 200),
+          request_hash TEXT NOT NULL CHECK(length(request_hash) = 64),
+          response_status INTEGER,
+          response_json TEXT,
+          created_at TEXT NOT NULL,
+          completed_at TEXT,
+          PRIMARY KEY(user_id, idempotency_key),
+          CHECK(
+            (response_status IS NULL AND response_json IS NULL AND completed_at IS NULL)
+            OR
+            (response_status BETWEEN 100 AND 599 AND response_json IS NOT NULL AND completed_at IS NOT NULL)
+          )
+        );
+        CREATE INDEX idx_idempotency_created ON api_idempotency_keys(created_at);
+      `);
+    },
+  },
 ];
 
 function applyMigrations(database: ApiDatabase): void {
@@ -152,7 +193,7 @@ function applyMigrations(database: ApiDatabase): void {
 
   const requiredTables = [
     "api_users", "api_sessions", "accounts", "categories",
-    "transactions", "transfers", "budgets",
+    "transactions", "transfers", "budgets", "api_idempotency_keys",
   ];
   const missingTables = requiredTables.filter((table) => {
     const row = database
