@@ -6,7 +6,7 @@ Status: design/audit only. This document does not enable synchronization, deploy
 
 - Flutter app: `K3NYEL/finora`.
 - API: `K3NYEL/Finora-DataBase`, current API work on `feat/initial-api-and-validation` (draft PR #1).
-- API PR implements authenticated list/create endpoints, version-checked PATCH updates, owner-scoped soft DELETE, and tombstone-aware list reads. Cursor-based incremental sync and dedicated sync endpoints are not implemented.
+- API PR implements authenticated list/create endpoints, version-checked PATCH updates, owner-scoped soft DELETE, tombstone-aware list reads, and authenticated incremental pull at `GET /api/v1/sync/changes`.
 
 ## Local schema observed
 
@@ -43,7 +43,7 @@ The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-uni
 1. Validate the app's v6 migration with Flutter tests and a copied pre-migration database; never test migrations against the live user database.
 2. Agree on the local ID strategy (recommended: add a stable UUID sync ID while preserving local integer IDs initially).
 3. [Implemented in API branch] Version-checked PATCH, owner-scoped soft DELETE, tombstone-aware normal list reads, and dependency guards, with stale-version, cross-user, and dependency tests.
-4. [Incremental pull implemented in API branch] `GET /api/v1/sync/changes` uses the global sequence as a cursor and returns current record state plus tombstones; add regression tests for pagination, cursor validation, and owner isolation. Next implement an explicit push/batch-apply contract with idempotency and expected-version checks.
+4. [Implemented and CI-validated in API branch] `GET /api/v1/sync/changes` uses a global sequence watermark, validates cursor/limit, paginates owner-scoped changes, and includes the latest state and tombstones. Tests cover pagination, invalid cursors/limits, authentication, and cross-user isolation. Next implement an explicit push/batch-apply contract with idempotency and expected-version checks.
 5. Implement an explicit opt-in link flow and a dry-run preview (counts and conflicts) before any upload.
 6. Test offline retries, duplicate requests, cross-user access, deletion propagation, and migration rollback/recovery.
 7. Only after review, enable sync behind an explicit user setting. Do not deploy publicly until transport security, backups, monitoring, and account-linking design are verified.
