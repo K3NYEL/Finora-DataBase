@@ -171,7 +171,7 @@ test("database migrations are recorded and safely re-run", async () => {
   try {
     const migration = database.prepare("SELECT MAX(version) AS version FROM schema_migrations")
       .get() as { version: number };
-    assert.equal(migration.version, 1);
+    assert.equal(migration.version, 2);
     assert.equal(database.pragma("foreign_keys", { simple: true }), 1);
   } finally {
     database.close();
@@ -181,7 +181,7 @@ test("database migrations are recorded and safely re-run", async () => {
   try {
     const rows = reopened.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as
       Array<{ version: number }>;
-    assert.deepEqual(rows, [{ version: 1 }]);
+    assert.deepEqual(rows, [{ version: 1 }, { version: 2 }]);
   } finally {
     reopened.close();
   }
@@ -270,4 +270,152 @@ test("valid login creates a separate session for the existing account", async ()
   assert.equal(login.statusCode, 200);
   assert.equal(login.json().user.id, register.json().user.id);
   assert.notEqual(login.json().accessToken, register.json().accessToken);
+});
+
+
+test("financial routes require authentication and isolate each user's records", async () => {
+  const registerUser = async (username: string) => {
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/auth/register",
+      payload: { username, password },
+    });
+    assert.equal(response.statusCode, 201);
+    return response.json().accessToken as string;
+  };
+  const aliceToken = await registerUser("alice_finora");
+  const bobToken = await registerUser("bob_finora");
+  const auth = (token: string) => ({ authorization: `Bearer ${token}` });
+
+  const unauthenticated = await app.inject({ method: "GET", url: "/api/v1/accounts" });
+  assert.equal(unauthenticated.statusCode, 401);
+
+  const accountResponse = await app.inject({
+    method: "POST", url: "/api/v1/accounts", headers: auth(aliceToken),
+    payload: { name: "Daily", type: "cash", currencyCode: "DOP", openingBalanceMinor: 120000 },
+  });
+  assert.equal(accountResponse.statusCode, 201);
+  const aliceAccount = accountResponse.json().account;
+
+  const categoryResponse = await app.inject({
+    method: "POST", url: "/api/v1/categories", headers: auth(aliceToken),
+    payload: { name: "Food", kind: "expense" },
+  });
+  assert.equal(categoryResponse.statusCode, 201);
+  const aliceCategory = categoryResponse.json().category;
+
+  const bobAccounts = await app.inject({ method: "GET", url: "/api/v1/accounts", headers: auth(bobToken) });
+  const bobCategories = await app.inject({ method: "GET", url: "/api/v1/categories", headers: auth(bobToken) });
+  assert.deepEqual(bobAccounts.json().accounts, []);
+  assert.deepEqual(bobCategories.json().categories, []);
+
+  const crossUserTransaction = await app.inject({
+    method: "POST", url: "/api/v1/transactions", headers: auth(bobToken),
+    payload: {
+      accountId: aliceAccount.id, categoryId: aliceCategory.id, kind: "expense",
+      amountMinor: 2500, occurredAt: "2026-10-10T12:00:00.000Z", description: "should not save",
+    },
+  });
+  assert.equal(crossUserTransaction.statusCode, 404);
+
+  const crossUserBudget = await app.inject({
+    method: "POST", url: "/api/v1/budgets", headers: auth(bobToken),
+    payload: {
+      categoryId: aliceCategory.id, amountMinor: 10000,
+      periodStart: "2026-10-01", periodEnd: "2026-10-31",
+    },
+  });
+  assert.equal(crossUserBudget.statusCode, 404);
+
+  const transactionResponse = await app.inject({
+    method: "POST", url: "/api/v1/transactions", headers: auth(aliceToken),
+    payload: {
+      accountId: aliceAccount.id, categoryId: aliceCategory.id, kind: "expense",
+      amountMinor: 2500, occurredAt: "2026-10-10T12:00:00.000Z", description: "Lunch",
+    },
+  });
+  assert.equal(transactionResponse.statusCode, 201);
+  assert.equal(transactionResponse.json().transaction.amountMinor, 2500);
+
+  const aliceTransactions = await app.inject({ method: "GET", url: "/api/v1/transactions", headers: auth(aliceToken) });
+  const bobTransactions = await app.inject({ method: "GET", url: "/api/v1/transactions", headers: auth(bobToken) });
+  assert.equal(aliceTransactions.json().transactions.length, 1);
+  assert.deepEqual(bobTransactions.json().transactions, []);
+});
+
+test("financial routes reject invalid amounts and cross-user transfer accounts", async () => {
+  const registerUser = async (username: string) => {
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/auth/register",
+      payload: { username, password },
+    });
+    assert.equal(response.statusCode, 201);
+    return response.json().accessToken as string;
+  };
+  const aliceToken = await registerUser("alice_finora");
+  const bobToken = await registerUser("bob_finora");
+  const auth = (token: string) => ({ authorization: `Bearer ${token}` });
+
+  const aliceAccountResponse = await app.inject({
+    method: "POST", url: "/api/v1/accounts", headers: auth(aliceToken),
+    payload: { name: "Savings", type: "savings", currencyCode: "DOP" },
+  });
+  const bobAccountResponse = await app.inject({
+    method: "POST", url: "/api/v1/accounts", headers: auth(bobToken),
+    payload: { name: "Wallet", type: "cash", currencyCode: "DOP" },
+  });
+  const aliceAccount = aliceAccountResponse.json().account;
+  const bobAccount = bobAccountResponse.json().account;
+
+  const invalidAmount = await app.inject({
+    method: "POST", url: "/api/v1/transactions", headers: auth(aliceToken),
+    payload: {
+      accountId: aliceAccount.id, kind: "expense", amountMinor: 0,
+      occurredAt: "2026-10-10T12:00:00.000Z",
+    },
+  });
+  assert.equal(invalidAmount.statusCode, 400);
+
+  const crossUserTransfer = await app.inject({
+    method: "POST", url: "/api/v1/transfers", headers: auth(aliceToken),
+    payload: {
+      fromAccountId: aliceAccount.id, toAccountId: bobAccount.id, amountMinor: 500,
+      occurredAt: "2026-10-10T12:00:00.000Z",
+    },
+  });
+  assert.equal(crossUserTransfer.statusCode, 404);
+
+  const selfTransfer = await app.inject({
+    method: "POST", url: "/api/v1/transfers", headers: auth(aliceToken),
+    payload: {
+      fromAccountId: aliceAccount.id, toAccountId: aliceAccount.id, amountMinor: 500,
+      occurredAt: "2026-10-10T12:00:00.000Z",
+    },
+  });
+  assert.equal(selfTransfer.statusCode, 400);
+});
+
+test("budgets require an owned expense category and duplicate periods are rejected", async () => {
+  const registerUser = async (username: string) => {
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/auth/register",
+      payload: { username, password },
+    });
+    assert.equal(response.statusCode, 201);
+    return response.json().accessToken as string;
+  };
+  const token = await registerUser("budget_owner");
+  const auth = { authorization: `Bearer ${token}` };
+  const categoryResponse = await app.inject({
+    method: "POST", url: "/api/v1/categories", headers: auth,
+    payload: { name: "Rent", kind: "expense" },
+  });
+  const categoryId = categoryResponse.json().category.id;
+  const payload = {
+    categoryId, amountMinor: 800000,
+    periodStart: "2026-10-01", periodEnd: "2026-10-31",
+  };
+  const first = await app.inject({ method: "POST", url: "/api/v1/budgets", headers: auth, payload });
+  assert.equal(first.statusCode, 201);
+  const duplicate = await app.inject({ method: "POST", url: "/api/v1/budgets", headers: auth, payload });
+  assert.equal(duplicate.statusCode, 409);
 });
