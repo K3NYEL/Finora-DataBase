@@ -1,19 +1,25 @@
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiDatabase } from "./database.js";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const SCRYPT_KEY_LENGTH = 64;
 const SCRYPT_OPTIONS = { N: 16_384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
-const scryptAsync = promisify(scrypt);
+function scryptAsync(password: string, salt: Buffer, keyLength: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, keyLength, SCRYPT_OPTIONS, (error, derivedKey) => {
+      if (error) reject(error);
+      else resolve(derivedKey);
+    });
+  });
+}
 const DUMMY_PASSWORD_HASH = hashPassword("dummy-password-never-used-for-an-account");
 
 type Credentials = { username: string; password: string };
 
 async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
-  const hash = await scryptAsync(password, salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS) as Buffer;
+  const hash = await scryptAsync(password, salt, SCRYPT_KEY_LENGTH) as Buffer;
   return `scrypt$${salt.toString("base64url")}$${hash.toString("base64url")}`;
 }
 
