@@ -196,11 +196,13 @@ test("sync migration adds versioning, tombstones, timestamps, and idempotency st
       assert.equal(columns.some((column) => column.name === "sync_version"), true, table);
       assert.equal(columns.some((column) => column.name === "deleted_at"), true, table);
       assert.equal(columns.some((column) => column.name === "updated_at"), true, table);
+      assert.equal(columns.some((column) => column.name === "sync_seq"), true, table);
     }
     const idempotencyTable = database.prepare(
       "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'api_idempotency_keys'",
     ).get();
     assert.ok(idempotencyTable);
+    assert.ok(database.prepare("SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?").get("table", "sync_clock"));
   } finally {
     database.close();
   }
