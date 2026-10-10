@@ -1,27 +1,32 @@
 # Finora DataBase
 
-Backend foundation for Finora, built with Node.js 22, TypeScript, and Fastify. The repository is intentionally separate from the Finora client and uses an independent, GitHub-inspired developer workflow.
+Backend API foundation for Finora, built with Node.js 22, TypeScript, Fastify, and SQLite. The backend has its own GitHub-inspired workflow and remains separate from the Flutter client.
 
-## Current status
+## Current API
 
-- Versioned API namespace: `/api/v1`
-- Health endpoint: `GET /api/v1/health`
-- Security headers via Helmet
-- Global and health-endpoint rate limits
+- `GET /api/v1/health` — service health
+- `POST /api/v1/auth/register` — create an API account
+- `POST /api/v1/auth/login` — authenticate and create a session
+- `GET /api/v1/auth/me` — return the authenticated account
+- `POST /api/v1/auth/logout` — revoke the current bearer session
+
+Registration/login currently use a username (3–32 characters: letters, numbers, dot, underscore, hyphen) and a password of 12–128 characters. Passwords are stored as scrypt hashes with random salts; session tokens are random, expire after 30 days, and only their SHA-256 hashes are stored in SQLite. Authentication endpoints have dedicated rate limits.
+
+## Security and storage
+
+- Helmet security headers, global and route-specific rate limits
 - Request body limit and request timeout
-- Exact-origin CORS allowlist via `CORS_ORIGINS`
-- Redaction of authorization, cookie, password, token, and secret fields in logs
-- Generic JSON responses for unknown routes and server errors
+- Exact-origin allowlist via `CORS_ORIGINS`
+- Redaction of authorization and credential-related fields in logs
+- Generic JSON error responses
+- SQLite foreign-key enforcement, WAL mode, busy timeout, and restrictive file permissions where supported
 - Automated tests, TypeScript type-check, and build in GitHub Actions
 
-**Not enabled yet:** database connection, user authentication, financial-data endpoints, or synchronization. Finora remains local-first with SQLite; this API scaffold does not send financial records anywhere.
-
-## Requirements
-
-- Node.js 22 or newer
-- npm
+The server binds to `127.0.0.1:3000` by default. SQLite storage defaults to `./data/finora.db`; the database and its sidecar files must not be committed or served as static files.
 
 ## Run locally
+
+Requirements: Node.js 22 or newer and npm.
 
 ```bash
 npm install
@@ -29,13 +34,23 @@ cp .env.example .env
 npm run dev
 ```
 
-By default, the server binds only to `127.0.0.1:3000`. Check health:
+Health check:
 
 ```bash
 curl http://127.0.0.1:3000/api/v1/health
 ```
 
-To test and build:
+Example account registration:
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/v1/auth/register \
+  -H 'content-type: application/json' \
+  -d '{"username":"finora_user","password":"use-a-long-unique-password"}'
+```
+
+Use the returned `accessToken` as `Authorization: Bearer <token>` for `/api/v1/auth/me` and `/api/v1/auth/logout`. Do not put real passwords or tokens in shell history, screenshots, or issue reports.
+
+Run checks:
 
 ```bash
 npm test
@@ -46,12 +61,20 @@ npm start
 
 ## Configuration
 
-- `HOST`: defaults to `127.0.0.1`; do not expose the process directly to the internet.
+- `HOST`: defaults to `127.0.0.1`; use a trusted reverse proxy before public exposure.
 - `PORT`: defaults to `3000`.
-- `CORS_ORIGINS`: comma-separated, exact web origins, including scheme and port when applicable. Keep empty until the actual frontend origin is known.
+- `DATABASE_PATH`: defaults to `./data/finora.db`.
+- `CORS_ORIGINS`: comma-separated exact web origins, including scheme and port. Keep empty until the actual frontend origin is confirmed.
 
-Never commit `.env`, credentials, tokens, or production secrets.
+Never commit `.env`, SQLite database files, credentials, tokens, or production secrets.
 
-## Before public deployment
+## Not implemented yet
 
-Do not deploy this scaffold as a financial-data API yet. Before public exposure, configure HTTPS through a trusted reverse proxy, production CORS origins, monitoring and alerting, and a reviewed authentication/authorization and data model. Database migrations, account isolation, validation, abuse protection, and security tests must be implemented before accepting personal financial data.
+- Financial-data endpoints and sync
+- Linking API accounts to existing local Finora profiles
+- Password reset, session listing/revocation across devices, and account recovery
+- Production HTTPS, monitoring, backups, and deployment configuration
+
+The existing Finora app currently identifies local profiles by first and last name and does not collect a unique username. This API's username-based identity is deliberately not wired into the app yet; a client/account-linking design must be agreed and tested before sync can be enabled. No local financial records are uploaded by this API.
+
+**Do not deploy this as a public financial-data service yet.** Before accepting real personal financial data, complete account-linking design, financial schema/migrations, ownership checks on every query, authorization tests, production HTTPS/CORS, backup and restore procedures, and operational monitoring.
