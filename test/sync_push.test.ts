@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +23,7 @@ async function register(username: string): Promise<string> {
   assert.equal(response.statusCode,201);
   return response.json().accessToken as string;
 }
-const uuid = () => crypto.randomUUID();
+const uuid = () => randomUUID();
 
 test("batch push atomically creates a resource and replays an identical idempotent request", async () => {
   const token=await register("push_owner"), id=uuid(), key="sync-push-batch-0001";
