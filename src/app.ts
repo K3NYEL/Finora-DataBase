@@ -33,6 +33,11 @@ export async function buildApp(options: { databasePath?: string } = {}): Promise
   await app.register(helmet);
   await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
 
+  app.addHook("onSend", async (_request, reply, payload) => {
+    reply.header("Cache-Control", "no-store");
+    return payload;
+  });
+
   const allowedOrigins = parseAllowedOrigins(process.env.CORS_ORIGINS);
   app.addHook("onRequest", async (request, reply) => {
     const origin = request.headers.origin;
