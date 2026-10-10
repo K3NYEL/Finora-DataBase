@@ -76,7 +76,7 @@ test("preflight rejects unsupported methods and headers", async () => {
   const badMethod = await app.inject({
     method: "OPTIONS",
     url: "/api/v1/auth/login",
-    headers: { origin: allowedOrigin, "access-control-request-method": "DELETE" },
+    headers: { origin: allowedOrigin, "access-control-request-method": "PUT" },
   });
   assert.equal(badMethod.statusCode, 403);
   assert.equal(badMethod.json().error.code, "PREFLIGHT_NOT_ALLOWED");
