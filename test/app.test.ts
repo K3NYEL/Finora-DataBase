@@ -521,3 +521,110 @@ test("versioned updates reject stale versions and deletes create owner-scoped to
   });
   assert.equal(repeatedDelete.statusCode, 404);
 });
+
+
+test("versioned edits reject stale writes and deletes create hidden tombstones", async () => {
+  const register = await app.inject({
+    method: "POST", url: "/api/v1/auth/register",
+    payload: { username: "version_owner", password },
+  });
+  assert.equal(register.statusCode, 201);
+  const token = register.json().accessToken as string;
+  const auth = { authorization: `Bearer ${token}` };
+
+  const created = await app.inject({
+    method: "POST", url: "/api/v1/accounts", headers: auth,
+    payload: { name: "Wallet", type: "cash", currencyCode: "DOP", openingBalanceMinor: 5000 },
+  });
+  assert.equal(created.statusCode, 201);
+  const id = created.json().account.id as string;
+
+  const updated = await app.inject({
+    method: "PATCH", url: `/api/v1/accounts/${id}`, headers: auth,
+    payload: { expectedVersion: 1, changes: { name: "Daily wallet" } },
+  });
+  assert.equal(updated.statusCode, 200);
+  assert.equal(updated.json().resource.syncVersion, 2);
+
+  const staleUpdate = await app.inject({
+    method: "PATCH", url: `/api/v1/accounts/${id}`, headers: auth,
+    payload: { expectedVersion: 1, changes: { name: "Stale overwrite" } },
+  });
+  assert.equal(staleUpdate.statusCode, 409);
+  assert.equal(staleUpdate.json().error.code, "VERSION_CONFLICT");
+  assert.equal(staleUpdate.json().currentVersion, 2);
+
+  const listBeforeDelete = await app.inject({
+    method: "GET", url: "/api/v1/accounts", headers: auth,
+  });
+  assert.equal(listBeforeDelete.json().accounts.length, 1);
+  assert.equal(listBeforeDelete.json().accounts[0].name, "Daily wallet");
+  assert.equal(listBeforeDelete.json().accounts[0].syncVersion, 2);
+
+  const deleted = await app.inject({
+    method: "DELETE", url: `/api/v1/accounts/${id}`, headers: auth,
+    payload: { expectedVersion: 2 },
+  });
+  assert.equal(deleted.statusCode, 200);
+  assert.equal(deleted.json().resource.syncVersion, 3);
+
+  const listAfterDelete = await app.inject({
+    method: "GET", url: "/api/v1/accounts", headers: auth,
+  });
+  assert.deepEqual(listAfterDelete.json().accounts, []);
+
+  const database = openDatabase(databasePath);
+  try {
+    const row = database.prepare("SELECT sync_version, deleted_at FROM accounts WHERE id = ?")
+      .get(id) as { sync_version: number; deleted_at: string | null };
+    assert.equal(row.sync_version, 3);
+    assert.equal(typeof row.deleted_at, "string");
+  } finally {
+    database.close();
+  }
+
+  const repeatedDelete = await app.inject({
+    method: "DELETE", url: `/api/v1/accounts/${id}`, headers: auth,
+    payload: { expectedVersion: 3 },
+  });
+  assert.equal(repeatedDelete.statusCode, 404);
+});
+
+test("versioned routes do not allow modifying or deleting another user's records", async () => {
+  const register = async (username: string) => {
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/auth/register",
+      payload: { username, password },
+    });
+    assert.equal(response.statusCode, 201);
+    return response.json().accessToken as string;
+  };
+  const ownerToken = await register("version_owner");
+  const otherToken = await register("version_other");
+  const created = await app.inject({
+    method: "POST", url: "/api/v1/accounts",
+    headers: { authorization: `Bearer ${ownerToken}` },
+    payload: { name: "Private", type: "cash", currencyCode: "DOP" },
+  });
+  const id = created.json().account.id as string;
+
+  const update = await app.inject({
+    method: "PATCH", url: `/api/v1/accounts/${id}`,
+    headers: { authorization: `Bearer ${otherToken}` },
+    payload: { expectedVersion: 1, changes: { name: "stolen" } },
+  });
+  assert.equal(update.statusCode, 404);
+
+  const remove = await app.inject({
+    method: "DELETE", url: `/api/v1/accounts/${id}`,
+    headers: { authorization: `Bearer ${otherToken}` },
+    payload: { expectedVersion: 1 },
+  });
+  assert.equal(remove.statusCode, 404);
+
+  const list = await app.inject({
+    method: "GET", url: "/api/v1/accounts",
+    headers: { authorization: `Bearer ${ownerToken}` },
+  });
+  assert.equal(list.json().accounts[0].name, "Private");
+});
