@@ -25,13 +25,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
-      - name: Export generated lockfile for repository lock-in
-        run: |
-          echo "FINORA_LOCKFILE_START"
-          cat package-lock.json
-          echo "FINORA_LOCKFILE_END"
+        run: npm ci --no-audit --no-fund
       - name: Run API tests
         run: npm test
       - name: Type-check
