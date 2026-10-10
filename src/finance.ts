@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiDatabase } from "./database.js";
 import { requireUser } from "./auth.js";
+import { executeIdempotently } from "./idempotency.js";
 
 type AuthenticatedUser = { id: string; username: string; created_at: string };
 type JsonObject = Record<string, unknown>;
@@ -178,15 +179,33 @@ export async function registerFinanceRoutes(app: FastifyInstance, database: ApiD
       return error(reply, 404, "CATEGORY_NOT_FOUND", "Category not found for this transaction");
     }
 
-    const id = randomUUID();
-    const createdAt = new Date().toISOString();
-    database.prepare(`
-      INSERT INTO transactions(id, user_id, account_id, category_id, kind, amount_minor, occurred_at, description, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, user.id, accountId, categoryId, kind, amountMinor, occurredAt, description, createdAt);
-    return reply.code(201).send({
-      transaction: { id, accountId, categoryId, kind, amountMinor, occurredAt, description, createdAt },
-    });
+    const keyHeader = request.headers["idempotency-key"];
+    const key = typeof keyHeader === "string" ? keyHeader : undefined;
+    const result = executeIdempotently(
+      database, user.id, key, "POST", "/api/v1/transactions", request.body,
+      () => {
+        const id = randomUUID();
+        const createdAt = new Date().toISOString();
+        const body = {
+          transaction: { id, accountId, categoryId, kind, amountMinor, occurredAt, description, createdAt },
+        };
+        database.prepare(`
+          INSERT INTO transactions(id, user_id, account_id, category_id, kind, amount_minor, occurred_at, description, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, user.id, accountId, categoryId, kind, amountMinor, occurredAt, description, createdAt, createdAt);
+        return { statusCode: 201, body };
+      },
+    );
+    if (result.kind === "invalid_key") {
+      return error(reply, 400, "IDEMPOTENCY_KEY_REQUIRED", "Provide a valid Idempotency-Key header");
+    }
+    if (result.kind === "key_reused") {
+      return error(reply, 409, "IDEMPOTENCY_KEY_REUSED", "This idempotency key was already used for a different request");
+    }
+    if (result.kind === "in_progress") {
+      return error(reply, 409, "IDEMPOTENCY_REQUEST_IN_PROGRESS", "A request with this idempotency key is still in progress");
+    }
+    return reply.code(result.statusCode).send(result.body);
   });
 
   app.get("/api/v1/transfers", async (request, reply) => {
@@ -218,15 +237,33 @@ export async function registerFinanceRoutes(app: FastifyInstance, database: ApiD
       return error(reply, 404, "ACCOUNT_NOT_FOUND", "One or more accounts were not found");
     }
 
-    const id = randomUUID();
-    const createdAt = new Date().toISOString();
-    database.prepare(`
-      INSERT INTO transfers(id, user_id, from_account_id, to_account_id, amount_minor, occurred_at, description, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, user.id, fromAccountId, toAccountId, amountMinor, occurredAt, description, createdAt);
-    return reply.code(201).send({
-      transfer: { id, fromAccountId, toAccountId, amountMinor, occurredAt, description, createdAt },
-    });
+    const keyHeader = request.headers["idempotency-key"];
+    const key = typeof keyHeader === "string" ? keyHeader : undefined;
+    const result = executeIdempotently(
+      database, user.id, key, "POST", "/api/v1/transfers", request.body,
+      () => {
+        const id = randomUUID();
+        const createdAt = new Date().toISOString();
+        const body = {
+          transfer: { id, fromAccountId, toAccountId, amountMinor, occurredAt, description, createdAt },
+        };
+        database.prepare(`
+          INSERT INTO transfers(id, user_id, from_account_id, to_account_id, amount_minor, occurred_at, description, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, user.id, fromAccountId, toAccountId, amountMinor, occurredAt, description, createdAt, createdAt);
+        return { statusCode: 201, body };
+      },
+    );
+    if (result.kind === "invalid_key") {
+      return error(reply, 400, "IDEMPOTENCY_KEY_REQUIRED", "Provide a valid Idempotency-Key header");
+    }
+    if (result.kind === "key_reused") {
+      return error(reply, 409, "IDEMPOTENCY_KEY_REUSED", "This idempotency key was already used for a different request");
+    }
+    if (result.kind === "in_progress") {
+      return error(reply, 409, "IDEMPOTENCY_REQUEST_IN_PROGRESS", "A request with this idempotency key is still in progress");
+    }
+    return reply.code(result.statusCode).send(result.body);
   });
 
   app.get("/api/v1/budgets", async (request, reply) => {
