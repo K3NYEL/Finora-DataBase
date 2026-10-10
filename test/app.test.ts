@@ -172,7 +172,7 @@ test("database migrations are recorded and safely re-run", async () => {
   try {
     const migration = database.prepare("SELECT MAX(version) AS version FROM schema_migrations")
       .get() as { version: number };
-    assert.equal(migration.version, 4);
+    assert.equal(migration.version, 5);
     assert.equal(database.pragma("foreign_keys", { simple: true }), 1);
   } finally {
     database.close();
@@ -182,7 +182,7 @@ test("database migrations are recorded and safely re-run", async () => {
   try {
     const rows = reopened.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as
       Array<{ version: number }>;
-    assert.deepEqual(rows, [{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }]);
+    assert.deepEqual(rows, [{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }, { version: 5 }]);
   } finally {
     reopened.close();
   }

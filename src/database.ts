@@ -198,6 +198,49 @@ const migrations: Migration[] = [
       }
     },
   },
+
+  {
+    version: 5,
+    apply(database) {
+      database.exec(`
+        CREATE TABLE notifications (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 120),
+          message TEXT NOT NULL CHECK(length(trim(message)) BETWEEN 1 AND 2000),
+          severity TEXT NOT NULL CHECK(severity IN ('info', 'success', 'warning', 'critical')),
+          created_at TEXT NOT NULL,
+          expires_at TEXT,
+          published INTEGER NOT NULL DEFAULT 1 CHECK(published IN (0, 1))
+        );
+        CREATE INDEX idx_notifications_published ON notifications(published, created_at DESC);
+
+        CREATE TABLE notification_reads (
+          notification_id TEXT NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES api_users(id) ON DELETE CASCADE,
+          read_at TEXT NOT NULL,
+          PRIMARY KEY(notification_id, user_id)
+        );
+        CREATE INDEX idx_notification_reads_user ON notification_reads(user_id, read_at DESC);
+
+        CREATE TABLE patch_releases (
+          id TEXT PRIMARY KEY,
+          version TEXT NOT NULL CHECK(length(version) BETWEEN 1 AND 32),
+          build INTEGER NOT NULL CHECK(build >= 0),
+          platform TEXT NOT NULL CHECK(platform IN ('android')),
+          architecture TEXT NOT NULL CHECK(architecture IN ('arm64-v8a', 'armeabi-v7a', 'x86_64', 'universal')),
+          download_url TEXT NOT NULL,
+          sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+          size_bytes INTEGER NOT NULL CHECK(size_bytes > 0 AND size_bytes <= 104857600),
+          mandatory INTEGER NOT NULL DEFAULT 0 CHECK(mandatory IN (0, 1)),
+          notes_json TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT NOT NULL,
+          published INTEGER NOT NULL DEFAULT 1 CHECK(published IN (0, 1)),
+          UNIQUE(version, build, platform, architecture)
+        );
+        CREATE INDEX idx_patch_releases_latest ON patch_releases(platform, architecture, published, build DESC);
+      `);
+    },
+  },
 ];
 
 function applyMigrations(database: ApiDatabase): void {
@@ -226,6 +269,7 @@ function applyMigrations(database: ApiDatabase): void {
   const requiredTables = [
     "api_users", "api_sessions", "accounts", "categories",
     "transactions", "transfers", "budgets", "api_idempotency_keys", "sync_clock",
+    "notifications", "notification_reads", "patch_releases",
   ];
   const missingTables = requiredTables.filter((table) => {
     const row = database
