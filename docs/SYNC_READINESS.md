@@ -6,7 +6,7 @@ Status: design/audit only. This document does not enable synchronization, deploy
 
 - Flutter app: `K3NYEL/finora`.
 - API: `K3NYEL/Finora-DataBase`, current API work on `feat/initial-api-and-validation` (draft PR #1).
-- API PR implements authenticated list/create endpoints, version-checked updates, and soft deletes. Cursor-based incremental sync, a complete conflict-resolution policy, and dedicated sync endpoints are not implemented.
+- API PR implements authenticated list/create endpoints, version-checked PATCH updates, owner-scoped soft DELETE, and tombstone-aware list reads. Cursor-based incremental sync and dedicated sync endpoints are not implemented.
 
 ## Local schema observed
 
@@ -34,15 +34,15 @@ The API uses UUID/text IDs, authenticated `user_id` ownership, integer minor-uni
 2. **Money:** the API accepts integer minor units. Use the local `*_minor` columns and validate their completeness; do not sync floating-point `REAL` amounts.
 3. **Field names and semantics:** `type` vs `kind`, `date` vs `occurred_at`, and transfer source/destination names need an explicit adapter. Confirm the exact local meanings before mapping.
 4. **Ownership:** local `user_id` is nullable and legacy records can remain unassigned. No record may be uploaded until a user explicitly links the local profile and confirms ownership/adoption.
-5. **Incremental changes:** tombstones, sync versions, update timestamps, and indexes now exist. Transaction/transfer creation requires an idempotency key, but account/category/budget creation is not yet idempotent and there is no sync cursor or endpoint yet.
-6. **Conflicts:** PATCH/DELETE now require `expectedVersion` and return 409 on stale writes. The app still needs a clear merge/conflict UX and a sync contract.
+5. **Incremental changes:** tombstones, sync versions, update timestamps, and indexes now exist. Normal list routes hide tombstones. Transaction/transfer creation requires an idempotency key; account/category/budget creation is not yet idempotent. There is no sync cursor or endpoint yet.
+6. **Conflicts:** PATCH/DELETE require `expectedVersion` and return 409 on stale writes. Account/category deletion is blocked while active dependent records exist. The app still needs a clear merge/conflict UX and a sync contract.
 7. **Account balance:** opening balance is not current balance. Current balance must be derived consistently from opening balance, transactions, and transfers.
 
 ## Safe implementation sequence
 
 1. Validate the app's v6 migration with Flutter tests and a copied pre-migration database; never test migrations against the live user database.
 2. Agree on the local ID strategy (recommended: add a stable UUID sync ID while preserving local integer IDs initially).
-3. [Implemented in API branch] Version-checked PATCH, owner-scoped soft DELETE, and tombstone-aware normal list reads, with stale-version and cross-user tests.
+3. [Implemented in API branch] Version-checked PATCH, owner-scoped soft DELETE, tombstone-aware normal list reads, and dependency guards, with stale-version, cross-user, and dependency tests.
 4. Define a stable incremental pull cursor and implement pull/push sync operations with conflict handling and authorization tests.
 5. Implement an explicit opt-in link flow and a dry-run preview (counts and conflicts) before any upload.
 6. Test offline retries, duplicate requests, cross-user access, deletion propagation, and migration rollback/recovery.
