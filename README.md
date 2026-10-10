@@ -1,6 +1,6 @@
 # Finora DataBase
 
-Backend API foundation for Finora, built with Node.js 22, TypeScript, Fastify, and SQLite. The backend has its own GitHub-inspired workflow and remains separate from the Flutter client.
+Backend API for Finora, built with Node.js 22, TypeScript, Fastify, and SQLite. The API project is separate from the Flutter client. The financial database on each device remains local unless a user explicitly chooses to upload an encrypted backup.
 
 ## Current API
 
@@ -14,23 +14,54 @@ Backend API foundation for Finora, built with Node.js 22, TypeScript, Fastify, a
 - `GET/POST /api/v1/transactions` — list/create income and expense movements
 - `GET/POST /api/v1/transfers` — list/create transfers between the user's own accounts
 - `GET/POST /api/v1/budgets` — list/create budgets tied to the user's own expense categories
+- `POST /api/v1/backups` — upload an encrypted backup
+- `GET /api/v1/backups` — list the authenticated user's backup metadata
+- `GET /api/v1/backups/:id` — download one of the authenticated user's encrypted backups
+- `DELETE /api/v1/backups/:id` — delete one of the authenticated user's backups
 
-Registration/login currently use a username (3–32 characters: letters, numbers, dot, underscore, hyphen) and a password of 12–128 characters. Passwords are stored as scrypt hashes with random salts; session tokens are random, expire after 30 days, and only their SHA-256 hashes are stored in SQLite. Authentication endpoints have dedicated rate limits.
+Registration/login use a username (3–32 characters: letters, numbers, dot, underscore, hyphen) and a password of 12–128 characters. Passwords are stored as scrypt hashes with random salts; session tokens are random, expire after 30 days, and only their SHA-256 hashes are stored in SQLite. Authentication endpoints have dedicated rate limits.
+
+## Encrypted backup API
+
+The backup vault stores **opaque encrypted bytes only**; it does not export financial rows from the API database. The Flutter client must encrypt the complete local backup on the device before calling this endpoint. Never upload plaintext JSON, an unencrypted SQLite file, passwords, encryption keys, or the local database directly. The server validates the payload format and SHA-256 integrity, but it cannot prove that a client really encrypted the bytes.
+
+Upload requires `Authorization: Bearer <accessToken>` and a JSON body with:
+- `format`: exactly `finora-encrypted-backup-v1`
+- `ciphertext`: base64url-encoded encrypted bytes
+- `sha256`: SHA-256 hex digest of the decoded encrypted bytes
+
+The API currently limits each encrypted backup to 5 MiB and each user to 10 backups. Backup files are stored separately from SQLite under `BACKUP_STORAGE_PATH`, in per-user directories with restrictive POSIX permissions where supported. The server generates opaque UUIDs for backup IDs, verifies checksums on download, and applies ownership checks to list, download, and delete operations. Upload is limited to 10 requests per hour per IP; the global API rate limit also applies.
+
+Example request shape (use ciphertext produced by the client-side encryption implementation; this placeholder is not a real backup):
+
+```http
+POST /api/v1/backups
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{
+  "format": "finora-encrypted-backup-v1",
+  "ciphertext": "<base64url-encrypted-bytes>",
+  "sha256": "<sha256-of-decoded-encrypted-bytes>"
+}
+```
+
+A successful upload returns HTTP 201 with backup metadata. Listing never returns ciphertext. Download returns the ciphertext plus metadata. A backup upload endpoint alone does not implement the Flutter UI, client-side encryption, restore validation, or automatic scheduled uploads; those must be completed and tested before enabling the feature in the app.
 
 ## Security and storage
 
 - Helmet security headers, global and route-specific rate limits
-- Request body limit and request timeout
+- Request body limits, request timeout, and no-store response headers
 - Exact-origin allowlist via `CORS_ORIGINS`
-- Redaction of authorization and credential-related fields in logs
+- Redaction of authorization and credential-related fields, including backup ciphertext, in logs
 - Generic JSON error responses
-- Transactional, versioned SQLite migrations (v1 auth/session tables; v2 financial tables); foreign-key enforcement, WAL mode, busy timeout, and restrictive database-file permissions where supported
-- Composite foreign keys tie each transaction, transfer, and budget reference to the same owner; API queries filter by the authenticated session user, not a client-supplied owner ID
-- Money values use positive integer minor units for movements and budgets; account opening balances are integer minor units
-- Automated tests for CORS preflight policy, session expiry/revocation, registration rate limits, token-hash storage, and cross-user financial access; TypeScript type-check and build in GitHub Actions
-- Locked npm dependency tree with reproducible `npm ci` installs
+- Transactional, versioned SQLite migrations; foreign-key enforcement, WAL mode, busy timeout, and restrictive database-file permissions where supported
+- Composite foreign keys tie financial references to the same owner; API queries filter by authenticated session user, not a client-supplied owner ID
+- Money values use integer minor units
+- Tests cover authentication, ownership isolation, idempotency, optimistic concurrency, sync tombstones, and backup upload/download/delete/integrity checks
+- Locked npm dependency tree for reproducible `npm ci` installs
 
-The server binds to `127.0.0.1:3000` by default. SQLite storage defaults to `./data/finora.db`; the database and its sidecar files must not be committed or served as static files.
+The server binds to `127.0.0.1:3000` by default. SQLite defaults to `./data/finora.db`; encrypted backups default to `./data/backups`. Both paths must be persistent, private, excluded from Git, and outside any static/public web root. Backups are not a substitute for a separate disaster-recovery copy of the server's storage.
 
 ## Run locally
 
@@ -48,16 +79,6 @@ Health check:
 curl http://127.0.0.1:3000/api/v1/health
 ```
 
-Example account registration:
-
-```bash
-curl -X POST http://127.0.0.1:3000/api/v1/auth/register \
-  -H 'content-type: application/json' \
-  -d '{"username":"finora_user","password":"use-a-long-unique-password"}'
-```
-
-Use the returned `accessToken` as `Authorization: Bearer <token>` for `/api/v1/auth/me` and `/api/v1/auth/logout`. Do not put real passwords or tokens in shell history, screenshots, or issue reports.
-
 Run checks:
 
 ```bash
@@ -73,21 +94,13 @@ npm start
 - `HOST`: defaults to `127.0.0.1`; use a trusted reverse proxy before public exposure.
 - `PORT`: defaults to `3000`.
 - `DATABASE_PATH`: defaults to `./data/finora.db`.
+- `BACKUP_STORAGE_PATH`: defaults to `./data/backups`; use persistent private storage.
 - `CORS_ORIGINS`: comma-separated exact web origins, including scheme and port. Keep empty until the actual frontend origin is confirmed.
 
-Never commit `.env`, SQLite database files, credentials, tokens, or production secrets.
+Never commit `.env`, SQLite database files, backup files, credentials, tokens, or encryption keys. Public deployment requires HTTPS, persistent storage, monitoring, tested backup/restore procedures, and reviewed hosting limits.
 
-## Current financial API scope
+## Current limitations
 
-The first financial API iteration provides list/create endpoints only. It intentionally does not yet support update/delete, pagination cursors, conflict resolution, balance summaries, idempotency keys, or client synchronization. Account balances must be derived from opening balances plus movements and transfers; do not treat stored opening balances as current balances.
+The first financial API iteration has account linking and client integration limitations. The Flutter app currently identifies local profiles by first and last name and does not collect a unique username; this API's username-based identity is not wired into the app. Do not enable financial sync automatically. The backup endpoints are server-side groundwork only: client-side encryption, an opt-in upload/restore flow, and real device integration are still required.
 
-## Not implemented yet
-
-- Client synchronization and conflict resolution
-- Linking API accounts to existing local Finora profiles
-- Password reset, session listing/revocation across devices, and account recovery
-- Production HTTPS, monitoring, backups, and deployment configuration
-
-The existing Finora app currently identifies local profiles by first and last name and does not collect a unique username. This API's username-based identity is deliberately not wired into the app yet; a client/account-linking design must be agreed and tested before sync can be enabled. No local financial records are uploaded by this API.
-
-**Do not deploy this as a public financial-data service yet.** Before accepting real personal financial data, complete account-linking design, financial schema/migrations, ownership checks on every query, authorization tests, production HTTPS/CORS, backup and restore procedures, and operational monitoring.
+**Do not deploy this as a public financial-data service yet.** Before accepting real data, review the API, finish client-side encryption and restore validation, configure HTTPS and persistent private storage on the selected host, and test recovery end to end.
